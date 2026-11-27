@@ -1001,7 +1001,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f9bc3f0bc357aab47aaf0be24ef9b8b6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  kickSample: {fileID: 8300000, guid: 069830f919ead09f9ba2a3df8c6adb39, type: 3}
+  firingOrderSemitones:
+  - 0
+  - -2
+  - -2
+  - 0
+  - -2
+  - 0
+  - 0
+  - -2
+  basePitchSemitones: 0
+  rpmPitchRiseSemitones: 2.5
+  firingsPerRevolution: 4
   volume: 0.8
+  distortionDrive: 1.6
+  supercharger: 0.16
 --- !u!114 &293419000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1014,7 +1029,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 42650eba344808c429823c2bc82ff516, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  wd: 1
+  startDriving: 0
+  tireSmokeMaterial: {fileID: 2100000, guid: d92d3ce1162885677a4052769a2170ae, type: 2}
   frontLeftWheelCollider: {fileID: 1602021285}
   frontRightWheelCollider: {fileID: 973850376}
   rearLeftWheelCollider: {fileID: 1262777900}
@@ -1023,10 +1039,17 @@ MonoBehaviour:
   frontRightWheelTransform: {fileID: 741787138}
   rearLeftWheelTransform: {fileID: 628037806}
   rearRightWheelTransform: {fileID: 1512781087}
+  frontLeftSFX: {fileID: 801428109}
+  frontRightSFX: {fileID: 2098222461}
+  rearLeftSFX: {fileID: 702191741}
+  rearRightSFX: {fileID: 611859794}
+  carRigidbody: {fileID: 293419002}
+  wd: 1
   maxSteeringAngle: 30
   motorForce: 1200
-  carRigidbody: {fileID: 293419002}
+  serviceBrakeTorque: 2350
   centerOfMass: 0.57
+  antiRollStiffness: 2600
   gearRatios:
   - 3
   - 1.9
@@ -1046,11 +1069,7 @@ MonoBehaviour:
   gear_switch: {fileID: 898143939}
   gear_up: {fileID: 8300000, guid: 697391839949c814295992defbbe5d56, type: 3}
   gear_down: {fileID: 8300000, guid: ba65a2db34fd284469bf4ba5ccd39e9d, type: 3}
-  frontLeftSFX: {fileID: 801428109}
-  frontRightSFX: {fileID: 2098222461}
-  rearLeftSFX: {fileID: 702191741}
-  rearRightSFX: {fileID: 611859794}
-  tireSmokeMaterial: {fileID: 2100000, guid: d92d3ce1162885677a4052769a2170ae, type: 2}
+  finalDrive: 5.2
 --- !u!65 &293419001
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -10168,6 +10187,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c12921c5e114e6f4cb6eef9efa375ec7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  car: {fileID: 293419000}
+  playerView: {fileID: 1062743441}
+  carView: {fileID: 3000000016}
   projectileStartPoint: {fileID: 1872545348}
   projectilePrefab: {fileID: 2127412723}
   shadow: {fileID: 387239522}
@@ -10236,9 +10258,6 @@ MonoBehaviour:
   inDialog: 0
   loadingScreen: {fileID: 0}
   weapon: 1
-  car: {fileID: 293419000}
-  playerView: {fileID: 1062743441}
-  carView: {fileID: 3000000016}
 --- !u!143 &1901638294
 CharacterController:
   m_ObjectHideFlags: 0
@@ -12036,24 +12055,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &3000000003
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 3000000000}
-  - component: {fileID: 3000000001}
-  - component: {fileID: 3000000002}
-  m_Layer: 0
-  m_Name: Wheel Mesh
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
 --- !u!4 &3000000000
 Transform:
   m_ObjectHideFlags: 0
@@ -12119,7 +12120,7 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!1 &3000000007
+--- !u!1 &3000000003
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -12127,9 +12128,9 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 3000000004}
-  - component: {fileID: 3000000005}
-  - component: {fileID: 3000000006}
+  - component: {fileID: 3000000000}
+  - component: {fileID: 3000000001}
+  - component: {fileID: 3000000002}
   m_Layer: 0
   m_Name: Wheel Mesh
   m_TagString: Untagged
@@ -12202,7 +12203,7 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!1 &3000000011
+--- !u!1 &3000000007
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -12210,9 +12211,9 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 3000000008}
-  - component: {fileID: 3000000009}
-  - component: {fileID: 3000000010}
+  - component: {fileID: 3000000004}
+  - component: {fileID: 3000000005}
+  - component: {fileID: 3000000006}
   m_Layer: 0
   m_Name: Wheel Mesh
   m_TagString: Untagged
@@ -12285,7 +12286,7 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!1 &3000000015
+--- !u!1 &3000000011
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -12293,9 +12294,9 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 3000000012}
-  - component: {fileID: 3000000013}
-  - component: {fileID: 3000000014}
+  - component: {fileID: 3000000008}
+  - component: {fileID: 3000000009}
+  - component: {fileID: 3000000010}
   m_Layer: 0
   m_Name: Wheel Mesh
   m_TagString: Untagged
@@ -12368,6 +12369,24 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!1 &3000000015
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3000000012}
+  - component: {fileID: 3000000013}
+  - component: {fileID: 3000000014}
+  m_Layer: 0
+  m_Name: Wheel Mesh
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
 --- !u!114 &3000000016
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -12378,10 +12397,26 @@ MonoBehaviour:
   m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e02c8a091a344374293dfdf8b703ad2b, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   target: {fileID: 293419003}
-  followSpeed: 8
+  distance: 5.4
+  brakingDistance: 4.05
+  maxSpeedPullback: 0.75
+  maxSpeedKphForEffects: 140
+  pivotFollowSpeed: 24
+  headingFollowSpeed: 4.2
+  distanceFollowSpeed: 6
+  maxRoll: 5.5
+  defaultPitch: 12
+  mouseSensitivity: 0.19
+  legacyMouseSensitivity: 2.5
+  stickDegreesPerSecond: 145
+  autoReturnDelay: 1.4
+  autoReturnSpeed: 3.5
+  baseFov: 60
+  maxFov: 76
+  fovLerpSpeed: 5
 --- !u!114 &3000000100
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -12392,8 +12427,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 46ad05c07ed94cd389a7a95a3cc137f8, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

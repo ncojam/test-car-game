@@ -2,67 +2,86 @@ using System;
 
 internal sealed class EngineSynthesizer
 {
-    // Eight firings per two revolutions. Signed strengths select the two exhaust banks.
-    private static readonly float[] Cylinders = { 1.00f, -0.94f, -1.02f, 0.97f, -1.03f, 0.92f, 1.04f, -0.96f };
+    private const int MaxVoices = 16;
 
-    private readonly float rate;
+    private struct Voice
+    {
+        public bool Active;
+        public double Position;
+        public double Step;
+        public float Gain;
+    }
+
+    private readonly float outputRate;
     private readonly float limiterRpm;
     private readonly float controlsBlend;
     private readonly float gainBlend;
-    private readonly float attackDecay;
-    private readonly float pressureDecay;
-    private readonly float valveDecay;
-    private Resonance exhaust;
-    private Resonance exhaustHarmonic;
-    private Resonance intake;
-    private Resonance bankTone;
-    private float bankFast;
-    private float bankSlow;
-    private Resonance valve;
     private readonly float blowerMix;
-    private double blowerPhase;
-    private double phase;
-    private float limiterPhase;
+    private readonly float drive;
+
+    private readonly float[] sampleData;
+    private readonly float sampleRateRatio;
+    private readonly float[] pitchRatios;
+    private readonly Voice[] voices = new Voice[MaxVoices];
+
+    private int nextVoice;
     private int cylinder;
-    private float fastPressure;
-    private float slowPressure;
-    private float valveEnvelope;
+    private double phase;
+    private double blowerPhase;
+    private float limiterPhase;
     private float smoothedRpm = 900f;
     private float smoothedLoad;
     private float smoothedGain;
-    private float noiseFloor;
+    private float rpmPitchFactor;
+    private float firingsPerRev;
     private uint random = 0xc1a83f45;
 
-    public EngineSynthesizer(int sampleRate, float redlineRpm, float supercharger = 0.16f)
+    public EngineSynthesizer(
+        int outputSampleRate,
+        float redlineRpm,
+        float[] kickSamples,
+        int kickSampleRate,
+        float[] semitonePattern,
+        float basePitchSemitones,
+        float rpmPitchShift,
+        float distortionDrive,
+        float supercharger,
+        float firingsPerRevolution)
     {
-        rate = sampleRate;
-        blowerMix = supercharger;
+        outputRate = outputSampleRate;
         limiterRpm = redlineRpm - 35f;
-        controlsBlend = 1f - Decay(0.024f);
-        gainBlend = 1f - Decay(0.035f);
-        attackDecay = Decay(0.00024f);
-        pressureDecay = Decay(0.0015f);
-        valveDecay = Decay(0.0009f);
-        exhaust = new Resonance(rate, 112f, 0.95f);
-        exhaustHarmonic = new Resonance(rate, 290f, 1.02f);
-        bankTone = new Resonance(rate, 173f, 1.35f);
-        intake = new Resonance(rate, 780f, 1.15f);
-        valve = new Resonance(rate, 2180f, 0.85f);
+        controlsBlend = 1f - Decay(0.02f);
+        gainBlend = 1f - Decay(0.03f);
+        blowerMix = supercharger;
+        drive = Math.Max(0.1f, distortionDrive);
+        rpmPitchFactor = rpmPitchShift;
+        firingsPerRev = Math.Max(0.5f, firingsPerRevolution);
+
+        sampleData = kickSamples ?? Array.Empty<float>();
+        sampleRateRatio = kickSampleRate > 0 ? (float)kickSampleRate / outputSampleRate : 1f;
+
+        if (semitonePattern == null || semitonePattern.Length == 0)
+            semitonePattern = new[] { 0f, -2f, -2f, 0f, -2f, 0f, 0f, -2f };
+
+        pitchRatios = new float[semitonePattern.Length];
+        for (int i = 0; i < semitonePattern.Length; i++)
+            pitchRatios[i] = (float)Math.Pow(2d, (semitonePattern[i] + basePitchSemitones) / 12d);
     }
 
     public void Render(float[] samples, float rpm, float load, float gain)
     {
-        rpm = Math.Max(700f, rpm);
+        rpm = Math.Max(650f, rpm);
+        bool hasSample = sampleData.Length > 1;
+
         for (int i = 0; i < samples.Length; i++)
         {
             smoothedRpm += (rpm - smoothedRpm) * controlsBlend;
             smoothedLoad += (load - smoothedLoad) * controlsBlend;
             smoothedGain += (gain - smoothedGain) * gainBlend;
-            float noise = WhiteNoise();
 
             if (smoothedRpm >= limiterRpm && smoothedLoad > 0.65f)
             {
-                limiterPhase += 13f / rate;
+                limiterPhase += 13f / outputRate;
                 if (limiterPhase >= 1f)
                     limiterPhase -= 1f;
             }
@@ -71,91 +90,76 @@ internal sealed class EngineSynthesizer
                 limiterPhase = 0f;
             }
 
-            // Advance by the firing frequency: RPM / 60 revolutions per second, four firings per revolution.
-            float firingStep = smoothedRpm / (15f * rate);
+            // Частота зажигания: (RPM / 60) * количество вспышек за оборот
+            double firingStep = (smoothedRpm / 60d) * firingsPerRev / outputRate;
             phase += firingStep;
             if (phase >= 1d)
             {
                 phase -= 1d;
-                float bank = Cylinders[cylinder];
-                float pulse = Math.Abs(bank) * (0.86f + 0.12f * noise + 0.24f * smoothedLoad);
-                cylinder = (cylinder + 1) % Cylinders.Length;
-                if (limiterPhase > 0.60f)
-                    pulse *= 0.16f;
+                if (hasSample && limiterPhase <= 0.60f)
+                {
+                    float rpmNorm = Math.Min(1f, smoothedRpm / limiterRpm);
+                    float rpmPitch = (float)Math.Pow(2d, (rpmNorm * rpmPitchFactor) / 12d);
+                    float jitter = 0.985f + 0.03f * WhiteNoise01();
 
-                // Age the pressure pulse by the fractional time elapsed since this firing.
-                float fraction = (float)phase / firingStep;
-                fastPressure += pulse * (1f - fraction * (1f - attackDecay));
-                slowPressure += pulse * (1f - fraction * (1f - pressureDecay));
-                float bankPulse = bank < 0f ? -pulse : pulse;
-                bankFast += bankPulse;
-                bankSlow += bankPulse;
-                valveEnvelope += pulse;
+                    voices[nextVoice] = new Voice
+                    {
+                        Active = true,
+                        Position = 0d,
+                        Step = sampleRateRatio * pitchRatios[cylinder] * rpmPitch * jitter,
+                        Gain = 0.72f + 0.38f * smoothedLoad
+                    };
+                    nextVoice = (nextVoice + 1) % MaxVoices;
+                }
+                cylinder = (cylinder + 1) % pitchRatios.Length;
             }
 
-            fastPressure *= attackDecay;
-            slowPressure *= pressureDecay;
-            valveEnvelope *= valveDecay;
-            bankFast *= attackDecay;
-            bankSlow *= pressureDecay;
-            float pressure = slowPressure - fastPressure;
-            noiseFloor += (noise - noiseFloor) * 0.14f;
+            float mixed = 0f;
+            if (hasSample)
+            {
+                int lastIndex = sampleData.Length - 1;
+                for (int v = 0; v < MaxVoices; v++)
+                {
+                    if (!voices[v].Active)
+                        continue;
 
-            float exhaustSound = 0.8f * exhaust.Run(pressure) + 0.46f * exhaustHarmonic.Run(pressure);
-            float intakeSound = intake.Run(pressure + noiseFloor * valveEnvelope * 0.32f);
-            float mechanical = valve.Run(noise * valveEnvelope);
+                    double pos = voices[v].Position;
+                    int idx = (int)pos;
+                    if (idx >= lastIndex)
+                    {
+                        voices[v].Active = false;
+                        continue;
+                    }
+
+                    float frac = (float)(pos - idx);
+                    float s = sampleData[idx] + (sampleData[idx + 1] - sampleData[idx]) * frac;
+                    mixed += s * voices[v].Gain;
+                    voices[v].Position = pos + voices[v].Step;
+                }
+            }
+
+            // Свист нагнетателя (Supercharger)
             float brightness = Math.Min(1f, smoothedRpm / limiterRpm);
-            float bankSound = bankTone.Run(bankSlow - bankFast);
-            // A geared blower tracks crank speed; its upper tone emerges under load.
-            blowerPhase += smoothedRpm * (14d / 60d) / rate;
+            blowerPhase += smoothedRpm * (14d / 60d) / outputRate;
             if (blowerPhase >= 1d)
                 blowerPhase -= 1d;
             float x = (float)blowerPhase * 2f - 1f;
             float whine = 4f * x * (1f - Math.Abs(x)) * brightness * brightness * smoothedLoad * blowerMix;
-            float mixed = whine + 0.40f * bankSound + exhaustSound * (0.94f + smoothedLoad * 0.46f)
-                + intakeSound * (0.38f + smoothedLoad * 0.85f + brightness * 0.52f) + mechanical * 0.12f;
-            samples[i] = smoothedGain * mixed / (1f + 0.74f * Math.Abs(mixed));
+
+            // Мягкий дисторшн (насыщение, как в FL Studio)
+            float driven = (mixed * 0.55f + whine) * drive;
+            float saturated = (float)Math.Tanh(driven);
+            samples[i] = smoothedGain * saturated;
         }
     }
 
-    private float Decay(float seconds)
-    {
-        return (float)Math.Exp(-1d / (rate * seconds));
-    }
+    private float Decay(float seconds) => (float)Math.Exp(-1d / (outputRate * seconds));
 
-    private float WhiteNoise()
+    private float WhiteNoise01()
     {
         random ^= random << 13;
         random ^= random >> 17;
         random ^= random << 5;
-        return (random >> 8) * (1f / 8388608f) - 1f;
-    }
-
-    private struct Resonance
-    {
-        private readonly float b0;
-        private readonly float a1;
-        private readonly float a2;
-        private float first;
-        private float second;
-
-        public Resonance(float sampleRate, float hz, float q)
-        {
-            double angle = 2d * Math.PI * hz / sampleRate;
-            double alpha = Math.Sin(angle) / (2d * q);
-            double a0 = 1d + alpha;
-            b0 = (float)(alpha / a0);
-            a1 = (float)(-2d * Math.Cos(angle) / a0);
-            a2 = (float)((1d - alpha) / a0);
-            first = second = 0f;
-        }
-
-        public float Run(float input)
-        {
-            float output = b0 * input + first;
-            first = second - a1 * output;
-            second = -b0 * input - a2 * output;
-            return output;
-        }
+        return (random >> 8) * (1f / 16777216f);
     }
 }

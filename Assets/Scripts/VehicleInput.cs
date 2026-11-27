@@ -8,14 +8,70 @@ internal struct VehicleInput
     public float Steer;
     public bool Handbrake;
 
-    public static bool InteractPressed => Input.GetKeyDown(KeyCode.E)
-        || (Gamepad.current?.buttonWest.wasPressedThisFrame ?? false)
-        || (Gamepad.current == null && Input.GetKeyDown(KeyCode.JoystickButton2));
+    private const float StickDeadzone = 0.12f;
+    private const float TriggerDeadzone = 0.05f;
 
-    public static Vector2 LookStick => Gamepad.current?.rightStick.ReadValue()
-        ?? new Vector2(Input.GetAxisRaw("StickR X"), -Input.GetAxisRaw("StickR Y"));
+    private static Gamepad ActivePad
+    {
+        get
+        {
+            if (Gamepad.current != null)
+                return Gamepad.current;
+            return Gamepad.all.Count > 0 ? Gamepad.all[0] : null;
+        }
+    }
 
-    // The legacy Linux Xbox/Steam Input mapping can expose signed trigger axes.
+    public static bool InteractPressed
+    {
+        get
+        {
+            Gamepad pad = ActivePad;
+            return Input.GetKeyDown(KeyCode.E)
+                || (pad != null && pad.buttonWest.wasPressedThisFrame)
+                || (pad == null && Input.GetKeyDown(KeyCode.JoystickButton2));
+        }
+    }
+
+    public static Vector2 MoveStick
+    {
+        get
+        {
+            Gamepad pad = ActivePad;
+            if (pad != null)
+                return ApplyStickDeadzone(pad.leftStick.ReadValue());
+
+            return ApplyStickDeadzone(new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical")));
+        }
+    }
+
+    public static Vector2 LookStick
+    {
+        get
+        {
+            Gamepad pad = ActivePad;
+            if (pad != null)
+                return ApplyStickDeadzone(pad.rightStick.ReadValue());
+
+            if (!HasLegacyPad())
+                return Vector2.zero;
+
+            return ApplyStickDeadzone(new Vector2(Input.GetAxisRaw("StickR X"), -Input.GetAxisRaw("StickR Y")));
+        }
+    }
+
+    private static Vector2 ApplyStickDeadzone(Vector2 raw)
+    {
+        float mag = raw.magnitude;
+        if (mag < StickDeadzone)
+            return Vector2.zero;
+        return raw.normalized * Mathf.InverseLerp(StickDeadzone, 1f, Mathf.Min(1f, mag));
+    }
+
+    private static float ApplyTriggerDeadzone(float value)
+    {
+        return value < TriggerDeadzone ? 0f : Mathf.InverseLerp(TriggerDeadzone, 1f, value);
+    }
+
     private static bool signedGas;
     private static bool signedBrake;
 
@@ -24,18 +80,20 @@ internal struct VehicleInput
         float value = Input.GetAxisRaw(axis);
         if (value < -0.8f)
             signed = true;
-        return signed ? Mathf.InverseLerp(-1f, 1f, value) : Mathf.Clamp01(value);
+        float norm = signed ? Mathf.InverseLerp(-1f, 1f, value) : Mathf.Clamp01(value);
+        return ApplyTriggerDeadzone(norm);
     }
 
     public static VehicleInput Read()
     {
         var input = new VehicleInput();
-        Gamepad pad = Gamepad.current;
+        Gamepad pad = ActivePad;
+
         if (pad != null)
         {
-            input.Gas = pad.rightTrigger.ReadValue();
-            input.Brake = pad.leftTrigger.ReadValue();
-            input.Steer = pad.leftStick.ReadValue().x;
+            input.Gas = ApplyTriggerDeadzone(pad.rightTrigger.ReadValue());
+            input.Brake = ApplyTriggerDeadzone(pad.leftTrigger.ReadValue());
+            input.Steer = ApplyStickDeadzone(pad.leftStick.ReadValue()).x;
             input.Handbrake = pad.buttonSouth.isPressed;
         }
         else if (HasLegacyPad())
@@ -47,7 +105,7 @@ internal struct VehicleInput
             input.Gas = Pedal("Car RT", ref signedGas);
             input.Brake = Pedal("Car LT", ref signedBrake);
 #endif
-            input.Steer = Input.GetAxisRaw("Horizontal");
+            input.Steer = ApplyStickDeadzone(new Vector2(Input.GetAxisRaw("Horizontal"), 0f)).x;
             input.Handbrake = Input.GetKey(KeyCode.JoystickButton0);
         }
 
@@ -59,6 +117,7 @@ internal struct VehicleInput
             input.Steer = -1f;
         if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow))
             input.Steer = 1f;
+
         input.Handbrake |= Input.GetKey(KeyCode.Space);
         return input;
     }
