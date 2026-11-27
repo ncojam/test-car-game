@@ -981,6 +981,7 @@ GameObject:
   - component: {fileID: 293419001}
   - component: {fileID: 293419000}
   - component: {fileID: 293418999}
+  - component: {fileID: 3000000100}
   m_Layer: 0
   m_Name: Car
   m_TagString: Untagged
@@ -1000,21 +1001,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f9bc3f0bc357aab47aaf0be24ef9b8b6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  source: {fileID: 898143939}
-  mainCamera: {fileID: 1062743439}
-  engineSoundStyle: 1
-  lowAccelClip: {fileID: 8300000, guid: a87ee343fbcba16449d646a60472e366, type: 3}
-  lowDecelClip: {fileID: 8300000, guid: e723a8e37def3bc4e9e437fb09d65414, type: 3}
-  highAccelClip: {fileID: 8300000, guid: 4e3f81737a08c4349af48478b698f3ed, type: 3}
-  highDecelClip: {fileID: 8300000, guid: 226b4870bb0b16b4ea3d1e47c0cce441, type: 3}
-  pitchMultiplier: 1
-  lowPitchMin: 2
-  lowPitchMax: 12
-  highPitchMultiplier: 0.28
-  maxRolloffDistance: 500
-  dopplerLevel: 1
-  useDoppler: 1
-  m_CarController: {fileID: 293419000}
+  volume: 0.8
 --- !u!114 &293419000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -12396,6 +12383,18 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   target: {fileID: 293419003}
   followSpeed: 8
+--- !u!114 &3000000100
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 293418998}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 46ad05c07ed94cd389a7a95a3cc137f8, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

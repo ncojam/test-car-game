@@ -36,10 +36,15 @@ public class CarController : MonoBehaviour
     public AudioClip gear_up;
     public AudioClip gear_down;
 
-    public float engineRPM { get; private set; }
-    public float maxRPM => 7000f;
-    public float maxRPM2 => maxRPM;
-    public float Throttle => CanDrive ? throttle : 0f;
+    [SerializeField, Min(1f)] private float finalDrive = 5.2f;
+
+    public const float IdleRpm = 900f;
+    public const float RedlineRpm = 7000f;
+    public float EngineRpm { get; private set; } = IdleRpm;
+    public float EngineLoad => CanDrive ? throttle * (1f - brake) * (1f - shiftTime / 0.3f) : 0f;
+    public bool IsDriving => driving;
+    public int GearNumber => currentGear + 1;
+    public float SpeedKph => carRigidbody != null ? carRigidbody.velocity.magnitude * 3.6f : 0f;
     public float Braking => CanDrive ? Mathf.Max(brake, handbrake ? 0.75f : 0f) : 0f;
     public float TurnRate => carRigidbody != null ? Vector3.Dot(carRigidbody.angularVelocity, transform.up) : 0f;
 
@@ -177,7 +182,8 @@ public class CarController : MonoBehaviour
         float torque = motorForce * ratio * throttle * (1f - brake)
             * Mathf.Lerp(0.62f, 1.06f, launch) * Mathf.Lerp(1f, 0.65f, shiftTime / 0.3f);
 
-        float drivenRPM = 0f;
+        float wheelRpmSum = 0f;
+        float radiusSum = 0f;
         int drivenWheels = 0;
         foreach (Wheel wheel in wheels)
         {
@@ -198,13 +204,23 @@ public class CarController : MonoBehaviour
 
             if (wheel.IsDriven)
             {
-                drivenRPM += Mathf.Abs(collider.rpm);
+                wheelRpmSum += Mathf.Abs(collider.rpm);
+                radiusSum += collider.radius;
                 drivenWheels++;
             }
         }
 
-        float targetRPM = Mathf.Clamp(900f + drivenRPM / Mathf.Max(1, drivenWheels) * ratio * 3.4f, 900f, maxRPM);
-        engineRPM = Mathf.Lerp(engineRPM, targetRPM, 1f - Mathf.Exp(-step * 7f));
+        if (drivenWheels > 0)
+        {
+            float radius = Mathf.Max(0.01f, radiusSum / drivenWheels);
+            float forwardSpeed = Mathf.Abs(Vector3.Dot(carRigidbody.velocity, transform.forward));
+            float roadWheelRpm = forwardSpeed * 60f / (2f * Mathf.PI * radius);
+            float spinRpm = Mathf.Max(0f, wheelRpmSum / drivenWheels - roadWheelRpm);
+            float coupledRpm = (roadWheelRpm + spinRpm * 0.62f) * ratio * finalDrive;
+            float launchFlare = throttle * 1350f * (1f - Mathf.InverseLerp(0.4f, 4.8f, forwardSpeed));
+            float targetRpm = Mathf.Clamp(Mathf.Max(IdleRpm + launchFlare, coupledRpm), IdleRpm, RedlineRpm);
+            EngineRpm = Mathf.Lerp(EngineRpm, targetRpm, 1f - Mathf.Exp(-step * (shiftTime > 0f ? 14f : 9f)));
+        }
     }
 
     private void Park()
@@ -215,7 +231,7 @@ public class CarController : MonoBehaviour
             wheel.Collider.brakeTorque = 4200f;
             wheel.Collider.steerAngle = 0f;
         }
-        engineRPM = 0f;
+        EngineRpm = IdleRpm;
     }
 
     private void ApplyAntiRoll(Wheel left, Wheel right)
