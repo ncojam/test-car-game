@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 //using UnityEngine.N3DS;
 //using UnityEngine.N3DS.GamePad; //that's for analog input values
@@ -195,7 +196,8 @@ public class PlayerController : MonoBehaviour {
 
 	// Update is called once per frame
 	void Update () {
-        if (Input.GetKeyDown(KeyCode.E) && car != null && carView != null && playerView != null
+        bool interact = Input.GetKeyDown(KeyCode.E) || Gamepad.current?.buttonWest.wasPressedThisFrame == true;
+        if (interact && car != null && carView != null && playerView != null
             && !GameManager.paused && !dead && !inDialog)
         {
             if (driving)
