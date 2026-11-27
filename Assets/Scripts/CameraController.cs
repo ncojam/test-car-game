@@ -132,12 +132,12 @@ public class CameraController : MonoBehaviour {
 		if(!GameManager.paused){
 			//get the x pos of the mouse & rotate the target
 			//horizontal = (Input.GetAxis("Mouse X") + ( GamePad.CirclePadPro.x * 37 ) + Input.GetAxis("StickR X")*20) * rotateSpeed  * Time.deltaTime;//3DS
-			horizontal = (Input.GetAxis("Mouse X") + Input.GetAxis("StickR X")*20) * rotateSpeed  * Time.deltaTime;//PC
+			horizontal = (Input.GetAxis("Mouse X") + VehicleInput.LookStick.x*20) * rotateSpeed  * Time.deltaTime;//PC
 			pivot2.Rotate (0, horizontal, 0);
 
 			//get the Y position of the mouse & rotate the pivot
 			//vertical = (Input.GetAxis("Mouse Y") + ( GamePad.CirclePadPro.y * 37 ) - Input.GetAxis("StickR Y")*20) * rotateSpeedY * inv * Time.deltaTime;//3DS
-			vertical = (Input.GetAxis("Mouse Y") - Input.GetAxis("StickR Y")*20) * rotateSpeedY * inv * Time.deltaTime;//PC
+			vertical = (Input.GetAxis("Mouse Y") + VehicleInput.LookStick.y*20) * rotateSpeedY * inv * Time.deltaTime;//PC
 			pivot.Rotate (-vertical, 0, 0);
 		}
 		

@@ -1,11 +1,9 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 [RequireComponent(typeof(Rigidbody))]
 public class CarController : MonoBehaviour
 {
     [SerializeField] private bool startDriving;
-    [SerializeField] private MeshRenderer bodyPlaceholder;
     [SerializeField] private Material tireSmokeMaterial;
 
     public WheelCollider frontLeftWheelCollider;
@@ -82,7 +80,6 @@ public class CarController : MonoBehaviour
             StartWheelSound(wheel.Sound);
         }
 
-        InstallBody();
         SetDriving(startDriving);
     }
 
@@ -100,30 +97,19 @@ public class CarController : MonoBehaviour
         wheel.suspensionSpring = suspension;
     }
 
-    private void InstallBody()
+    private VehicleInput input;
+
+    private void Update()
     {
-        if (bodyPlaceholder == null)
-            return;
-
-        GameObject model = Resources.Load<GameObject>("Cars/NGTR33");
-        Material material = Resources.Load<Material>("Cars/NGTR33 Body");
-        if (model == null || material == null || model.GetComponentInChildren<MeshRenderer>() == null)
-            return;
-
-        Transform mount = bodyPlaceholder.transform;
-        GameObject body = Instantiate(model, mount.parent, false);
-        body.name = "NGTR33 Body";
-        body.transform.SetLocalPositionAndRotation(new Vector3(0f, 0.48f, 0.02f), mount.localRotation);
-        body.transform.localScale = new Vector3(1f, 1f, 1.1f);
-        foreach (MeshRenderer renderer in body.GetComponentsInChildren<MeshRenderer>())
-            renderer.sharedMaterial = material;
-
-        bodyPlaceholder.enabled = false;
+        input = CanDrive ? VehicleInput.Read() : default;
     }
 
     public void SetDriving(bool active)
     {
+        input = default;
         driving = active;
+        if (active)
+            carRigidbody.WakeUp();
         throttle = brake = steering = 0f;
         handbrake = false;
         if (!active && wheels != null)
@@ -155,24 +141,12 @@ public class CarController : MonoBehaviour
 
     private void Drive(float speed, float step)
     {
-        Gamepad pad = Gamepad.current;
-        Keyboard keyboard = Keyboard.current;
-        float gasKey = keyboard != null && (keyboard.wKey.isPressed || keyboard.upArrowKey.isPressed) ? 1f : 0f;
-        float brakeKey = keyboard != null && (keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed) ? 1f : 0f;
-        float steerKeys = 0f;
-        if (keyboard != null)
-        {
-            steerKeys = (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed ? 1f : 0f)
-                - (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed ? 1f : 0f);
-        }
-
-        float throttleInput = Mathf.Max(gasKey, pad?.rightTrigger.ReadValue() ?? 0f);
-        float brakeInput = Mathf.Max(brakeKey, pad?.leftTrigger.ReadValue() ?? 0f);
-        float steerInput = steerKeys != 0f ? steerKeys : pad?.leftStick.ReadValue().x ?? 0f;
-        handbrake = (keyboard?.spaceKey.isPressed ?? false) || (pad?.buttonSouth.isPressed ?? false);
-        throttle = Mathf.MoveTowards(throttle, throttleInput, step * (throttleInput > throttle ? 4.5f : 10f));
-        brake = Mathf.MoveTowards(brake, brakeInput, step * 9f);
-        steering = Mathf.MoveTowards(steering, steerInput, step * 4f);
+        if (input.Gas > 0f && carRigidbody.IsSleeping())
+            carRigidbody.WakeUp();
+        handbrake = input.Handbrake;
+        throttle = Mathf.MoveTowards(throttle, input.Gas, step * (input.Gas > throttle ? 4.5f : 10f));
+        brake = Mathf.MoveTowards(brake, input.Brake, step * 9f);
+        steering = Mathf.MoveTowards(steering, input.Steer, step * 4f);
 
         UpdateGear(speed * 3.6f, step);
         float steerAngle = steering * maxSteeringAngle * Mathf.Lerp(1f, 0.32f, Mathf.InverseLerp(7f, 33f, speed));

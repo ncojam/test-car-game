@@ -65,7 +65,7 @@ public class CameraFollow : MonoBehaviour
 
             Vector2 mouseLook = Cursor.lockState == CursorLockMode.Locked
                 ? (mouse?.delta.ReadValue() ?? Vector2.zero) * mouseSensitivity : Vector2.zero;
-            Vector2 stick = Gamepad.current?.rightStick.ReadValue() ?? Vector2.zero;
+            Vector2 stick = VehicleInput.LookStick;
             Vector2 look = mouseLook + stick * (stickDegreesPerSecond * delta);
             orbitYaw = Mathf.Repeat(orbitYaw + look.x + 180f, 360f) - 180f;
             orbitPitch = Mathf.Clamp(orbitPitch + look.y, -5f, 65f);

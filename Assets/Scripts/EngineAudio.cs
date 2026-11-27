@@ -7,6 +7,8 @@ public sealed class EngineAudio : MonoBehaviour
 {
     [SerializeField, Range(0f, 1f)] private float volume = 0.8f;
 
+    [SerializeField, Range(0f, 1f)] private float supercharger = 0.16f;
+
     private CarController car;
     private AudioSource source;
     private AudioClip clip;
@@ -19,7 +21,7 @@ public sealed class EngineAudio : MonoBehaviour
     {
         car = GetComponent<CarController>();
         int rate = Mathf.Max(24000, AudioSettings.outputSampleRate);
-        synthesizer = new EngineSynthesizer(rate, CarController.RedlineRpm);
+        synthesizer = new EngineSynthesizer(rate, CarController.RedlineRpm, supercharger);
         clip = AudioClip.Create("Procedural engine", rate * 2, 1, rate, true, ReadAudio);
 
         var emitter = new GameObject("Engine sound");

@@ -196,7 +196,7 @@ public class PlayerController : MonoBehaviour {
 
 	// Update is called once per frame
 	void Update () {
-        bool interact = Input.GetKeyDown(KeyCode.E) || Gamepad.current?.buttonWest.wasPressedThisFrame == true;
+        bool interact = VehicleInput.InteractPressed;
         if (interact && car != null && carView != null && playerView != null
             && !GameManager.paused && !dead && !inDialog)
         {
@@ -532,9 +532,17 @@ public class PlayerController : MonoBehaviour {
 		}
 
 
+        horizontalInput = Input.GetAxisRaw("Horizontal");
+        verticalInput = Input.GetAxisRaw("Vertical");
+        Vector2 padMove = Gamepad.current?.leftStick.ReadValue() ?? Vector2.zero;
+        if (padMove.sqrMagnitude > horizontalInput * horizontalInput + verticalInput * verticalInput)
+        {
+            horizontalInput = padMove.x;
+            verticalInput = padMove.y;
+        }
 		//Move the player in different direcctions based on camera look direction
 		//if ( (Input.GetAxis ("Horizontal") != 0 || Input.GetAxis ("Vertical") != 0 || GamePad.CirclePad.x !=0 || GamePad.CirclePad.y !=0) && !dead && !inDialog && !paused ) {//3DS
-		if ((Input.GetAxisRaw ("Horizontal") != 0 || Input.GetAxisRaw ("Vertical") != 0 ) && !dead && !inDialog && !paused) {//PC
+		if ((horizontalInput != 0 || verticalInput != 0) && !dead && !inDialog && !paused) {//PC
 			if (pivot2.rotation.eulerAngles.y != 0f) {
 				transform.rotation = Quaternion.Euler (0f, pivot2.rotation.eulerAngles.y, 0f);
 				Quaternion newRotation = Quaternion.LookRotation (new Vector3 (moveDirection.x, 0f, moveDirection.z));
@@ -605,8 +613,7 @@ public class PlayerController : MonoBehaviour {
 		lastSpeed = moveDirection;
 		
 		// Получаем положение контроллера для PC
-        horizontalInput = Input.GetAxisRaw("Horizontal");
-        verticalInput = Input.GetAxisRaw("Vertical");
+
 		//Debug.Log(Input.GetAxisRaw("Horizontal"));
 		// Получаем положение контроллера для 3DS
 		//horizontalInput = Input.GetAxisRaw("Horizontal") + GamePad.CirclePad.x;

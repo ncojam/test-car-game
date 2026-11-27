@@ -1680,7 +1680,7 @@ MeshFilter:
   m_PrefabParentObject: {fileID: 0}
   m_PrefabInternal: {fileID: 0}
   m_GameObject: {fileID: 8930290954148789422}
-  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+  m_Mesh: {fileID: 4300000, guid: 7abdae074e8340f1b6b4f5284c359460, type: 2}
 --- !u!4 &3282840483828957835
 Transform:
   m_ObjectHideFlags: 0
@@ -1856,8 +1856,8 @@ Transform:
   m_PrefabInternal: {fileID: 0}
   m_GameObject: {fileID: 8930290954148789422}
   m_LocalRotation: {x: 0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.86, z: -0.04}
-  m_LocalScale: {x: 1.78, y: 0.78, z: 4.4}
+  m_LocalPosition: {x: 0, y: 0.48, z: 0.02}
+  m_LocalScale: {x: 1, y: 1, z: 1.1}
   m_Children: []
   m_Father: {fileID: 8409792844672941869}
   m_RootOrder: 1
@@ -1900,7 +1900,7 @@ MeshRenderer:
   m_LightProbeUsage: 1
   m_ReflectionProbeUsage: 1
   m_Materials:
-  - {fileID: 10303, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 2100000, guid: f6d1336ba4911f22c5e10dfe6a0b9336, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -2127,7 +2127,6 @@ MonoBehaviour:
   maxSteeringAngle: 30
   motorForce: 1000
   startDriving: 1
-  bodyPlaceholder: {fileID: 5806241702646689760}
   tireSmokeMaterial: {fileID: 2100000, guid: d92d3ce1162885677a4052769a2170ae, type: 2}
 --- !u!65 &9222886764067841433
 BoxCollider:
