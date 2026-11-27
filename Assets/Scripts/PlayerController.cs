@@ -7,6 +7,15 @@ using UnityEngine.SceneManagement;
 //using UnityEngine.N3DS.GamePad; //that's for analog input values
 
 public class PlayerController : MonoBehaviour {
+    [SerializeField] private CarController car;
+    [SerializeField] private CameraController playerView;
+    [SerializeField] private CameraFollow carView;
+
+    private bool driving;
+    private bool wasModelVisible;
+    private Vector3 playerCameraOffset;
+    private Quaternion playerCameraRotation;
+
 	public Transform projectileStartPoint;
     public GameObject projectilePrefab;
 
@@ -186,6 +195,17 @@ public class PlayerController : MonoBehaviour {
 
 	// Update is called once per frame
 	void Update () {
+        if (Input.GetKeyDown(KeyCode.E) && car != null && carView != null && playerView != null
+            && !GameManager.paused && !dead && !inDialog)
+        {
+            if (driving)
+                ExitCar();
+            else if ((car.transform.position - transform.position).sqrMagnitude <= 16f)
+                EnterCar();
+        }
+
+        if (driving)
+            return;
 		
 		// Кидаем рейкаст вниз
 		RaycastHit hitRSP;
@@ -245,7 +265,9 @@ public class PlayerController : MonoBehaviour {
         if ( ( Input.GetKeyDown(KeyCode.Escape) || Input.GetButtonDown("Cancel") ) && !inDialog && !dead && waitTillPause<=0)
        
 		{
-			FindObjectOfType<GameManager>().doPause();
+			GameManager gameManager = FindObjectOfType<GameManager>();
+            if (gameManager != null)
+                gameManager.doPause();
 		}
 
 		hitKnockback = Vector3.Lerp(hitKnockback, Vector3.zero, lerpSpeed * Time.deltaTime);
@@ -328,7 +350,8 @@ public class PlayerController : MonoBehaviour {
 			}
 			if (AllowDashAir) {
 				rushSpeed = rush;AllowDashAir = false; jumpSpeed = jumpForce*.1f;
-				source_dash.PlayOneShot(clip_dash);
+				if (source_dash != null && clip_dash != null)
+                    source_dash.PlayOneShot(clip_dash);
 			}
 		}
 		/*if (Input.GetButtonDown ("Fire1") && hitCountdown == 0 && !inDialog && !dead && !paused) {
@@ -480,7 +503,8 @@ public class PlayerController : MonoBehaviour {
 			if (jumpPressed > 0) {
 				if(!dead){
 					jumpSpeed = jumpForce / 6.7f; afterGround = 0;
-					source_jump.PlayOneShot(clip_jump);
+					if (source_jump != null && clip_jump != null)
+                        source_jump.PlayOneShot(clip_jump);
 				}
 			}
 		}
@@ -599,8 +623,60 @@ public class PlayerController : MonoBehaviour {
 
 	}
 	
+    private void EnterCar()
+    {
+        playerCameraOffset = playerView.transform.position - transform.position;
+        playerCameraRotation = playerView.transform.rotation;
+        wasModelVisible = playerModel.activeSelf;
+        playerModel.SetActive(false);
+        shadow.SetActive(false);
+        controller.enabled = false;
+        playerView.enabled = false;
+        carView.enabled = true;
+        car.SetDriving(true);
+        driving = true;
+    }
+
+    private void ExitCar()
+    {
+        if (!TryGetExitPosition(1f, out Vector3 position) && !TryGetExitPosition(-1f, out position))
+            return;
+
+        car.SetDriving(false);
+        transform.position = position;
+        currentVelocity = moveDirection = moveDir = hitKnockback = pushDirection = Vector3.zero;
+        jumpPressed = rushSpeed = 0f;
+        jumpSpeed = 0f;
+        timerRSP = 0f;
+        controller.enabled = true;
+        playerModel.SetActive(wasModelVisible);
+        carView.enabled = false;
+        playerView.transform.SetPositionAndRotation(position + playerCameraOffset, playerCameraRotation);
+        playerView.enabled = true;
+        driving = false;
+    }
+
+    private bool TryGetExitPosition(float side, out Vector3 position)
+    {
+        Vector3 carRight = Quaternion.Euler(0f, car.transform.eulerAngles.y, 0f) * Vector3.right;
+        Vector3 origin = car.transform.position + carRight * (2.2f * side) + Vector3.up * 2f;
+        position = Vector3.zero;
+        if (!Physics.Raycast(origin, Vector3.down, out RaycastHit ground, 4f, ~0, QueryTriggerInteraction.Ignore))
+            return false;
+
+        float halfHeight = controller.height * 0.5f;
+        float radius = controller.radius;
+        Vector3 centre = ground.point + Vector3.up * (halfHeight + 0.06f);
+        Vector3 capsuleOffset = Vector3.up * Mathf.Max(0f, halfHeight - radius);
+        position = centre - transform.rotation * controller.center;
+        return !Physics.CheckCapsule(centre - capsuleOffset, centre + capsuleOffset, radius, ~0,
+            QueryTriggerInteraction.Ignore);
+    }
+
 	private void FixedUpdate()
 	{
+        if (driving)
+            return;
 		
 		
 		

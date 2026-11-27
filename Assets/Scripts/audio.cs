@@ -55,7 +55,6 @@ using UnityEngine.UI;
         //public inputManager InputManager;
         //private AIcontroller aicontroler;
 		
-		private float verticalInput;
         
         private void StartSound()
         {
@@ -136,10 +135,7 @@ using UnityEngine.UI;
                     m_LowDecel.pitch = pitch*pitchMultiplier;
                     m_HighAccel.pitch = pitch*highPitchMultiplier*pitchMultiplier;
                     m_HighDecel.pitch = pitch*highPitchMultiplier*pitchMultiplier;
-                    float accFade = 0;
-                // get values for fading the sounds based on the acceleration
-					verticalInput = Input.GetAxis("Vertical");
-                    accFade = Mathf.Abs((verticalInput > 0 ) ?verticalInput : 0);
+                    float accFade = m_CarController.Throttle;
 
                     float decFade = 1 - accFade;
 
@@ -163,7 +159,6 @@ using UnityEngine.UI;
                     m_HighAccel.volume = highFade*accFade;
                     m_HighDecel.volume = highFade*decFade;
 					
-					Debug.Log(highFade+" "+m_CarController.engineRPM);
 
                     // adjust the doppler levels
                     m_HighAccel.dopplerLevel = useDoppler ? dopplerLevel : 0;

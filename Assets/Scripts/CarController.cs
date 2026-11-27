@@ -1,7 +1,4 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
 
 public class CarController : MonoBehaviour
 {
@@ -9,6 +6,11 @@ public class CarController : MonoBehaviour
     private float verticalInput;
     private float steerAngle;
     private bool isBreaking;
+
+    [SerializeField] private bool startDriving;
+    public float Throttle => IsDriving && !GameManager.paused ? Mathf.Clamp01(verticalInput) : 0f;
+
+    private bool IsDriving { get; set; }
 	
 	public int wd;
 	private int[] wd_consts = {1,0,0,1,1,1};
@@ -34,9 +36,9 @@ public class CarController : MonoBehaviour
 	public Rigidbody carRigidbody;
 	public float centerOfMass;
 	
-	public float[] gearRatios;
-	public float[] gearSpeeds;
-    public int currentGear = 1;
+	public float[] gearRatios = { 3f, 1.9f, 1.25f, 1f, 0.75f, 0.4f };
+	public float[] gearSpeeds = { 0f, 30f, 70f, 110f, 130f, 160f };
+    public int currentGear;
 	public float clutch = 0f;
 	public float clutch_down = 0f;
 	public AudioSource gear_switch;
@@ -58,47 +60,75 @@ public class CarController : MonoBehaviour
 	public AudioSource rearLeftSFX;
 	public AudioSource rearRightSFX;
 
-	void Start()
-	{
-		carRigidbody.centerOfMass = new Vector3(0, centerOfMass, 0); // Пример значения, подберите под свои нужды
-		DisplayCenterOfMass();
-		
-		frontLeftSFX.time = Random.Range(0f, frontLeftSFX.clip.length);
-		frontRightSFX.time = Random.Range(0f, frontRightSFX.clip.length);
-		rearLeftSFX.time = Random.Range(0f, rearLeftSFX.clip.length);
-		rearRightSFX.time = Random.Range(0f, rearRightSFX.clip.length);
-		frontLeftSFX.Play();
-		frontRightSFX.Play();
-		rearLeftSFX.Play();
-		rearRightSFX.Play();
-		
-	}
+    private void Awake()
+    {
+        if (carRigidbody == null)
+            carRigidbody = GetComponent<Rigidbody>();
+        carRigidbody.centerOfMass = new Vector3(0f, centerOfMass, 0f);
+        maxRPM = maxRPM2 = motorForce * gearRatios[0];
+        SetDriving(startDriving);
+    }
+
+    private void Start()
+    {
+        StartWheelSound(frontLeftSFX);
+        StartWheelSound(frontRightSFX);
+        StartWheelSound(rearLeftSFX);
+        StartWheelSound(rearRightSFX);
+    }
+
+    private static void StartWheelSound(AudioSource source)
+    {
+        if (source == null || source.clip == null)
+            return;
+
+        source.time = Random.Range(0f, source.clip.length);
+        source.volume = 0f;
+        source.Play();
+    }
+
+    public void SetDriving(bool driving)
+    {
+        IsDriving = driving;
+        if (!driving)
+            Park();
+    }
 
     private void FixedUpdate()
     {
-        GetInput();
-        HandleMotor();
-        HandleSteering();
+        if (IsDriving && !GameManager.paused)
+        {
+            GetInput();
+            HandleMotor();
+            HandleSteering();
+            HandleGear();
+        }
+        else
+        {
+            Park();
+        }
+
         UpdateWheels();
-		HandleGear();
-		HandleSlip();
-		
-		
-		
-		
-		// Добавим вывод в консоль
-		//Debug.Log(frontLeftSlip+" "+rearLeftSlip);
-        /*Debug.Log("Gear: " + currentGear + " Torque: " + frontLeftWheelCollider.motorTorque +
-		" rpm: " + engineRPM + " max: " + maxRPM + "Speed: " + GetComponent<Rigidbody>().velocity.magnitude * 3.6f + " km/h");*/
-		//Debug.Log("Gear: " + currentGear +
-		//" rpm: " + engineRPM + " max: " + maxRPM + " Torque: " + frontLeftWheelCollider.motorTorque);
-		//Debug.Log("Speed: " + GetComponent<Rigidbody>().velocity.magnitude * 3.6f + " km/h");
-		//Debug.Log("engineRPM: " + engineRPM);
-		//Debug.Log("slip: " + frontLeftSlip + "," + frontRightSlip + "," + rearLeftSlip);
-		//Debug.Log("rear slip: " + rearLeftSlip + " front slip: " + frontLeftSlip);
-		//Debug.Log("maxRPM: " + maxRPM);
-        /*Debug.Log("Current Gear: " + currentGear);
-		Debug.Log("Torque: " + frontLeftWheelCollider.motorTorque);*/
+        HandleSlip();
+    }
+
+    private void Park()
+    {
+        horizontalInput = 0f;
+        verticalInput = 0f;
+        isBreaking = false;
+        engineRPM = 0f;
+        ParkWheel(frontLeftWheelCollider);
+        ParkWheel(frontRightWheelCollider);
+        ParkWheel(rearLeftWheelCollider);
+        ParkWheel(rearRightWheelCollider);
+    }
+
+    private static void ParkWheel(WheelCollider wheel)
+    {
+        wheel.motorTorque = 0f;
+        wheel.brakeTorque = 9000f;
+        wheel.steerAngle = 0f;
     }
 
     private void GetInput()
@@ -117,39 +147,14 @@ public class CarController : MonoBehaviour
 
     private void HandleMotor()
     {
-        //frontLeftWheelCollider.motorTorque = verticalInput * motorForce;
-        //frontRightWheelCollider.motorTorque = verticalInput * motorForce;
-
-        /*brakeForce = isBreaking ? 3000f : 0f;
+        brakeForce = verticalInput < 0f ? 3000f : 0f;
+        brakeForceRear = isBreaking ? 9000f : (wd == 1 ? 0f : brakeForce);
         frontLeftWheelCollider.brakeTorque = brakeForce;
         frontRightWheelCollider.brakeTorque = brakeForce;
-        rearLeftWheelCollider.brakeTorque = brakeForce;
-        rearRightWheelCollider.brakeTorque = brakeForce;*/
-		
-		if(verticalInput<0f){
-			brakeForce = true ? 3000f : 0f;
-		}
-		else{
-			brakeForce = 0f;
-		}
-		
-		if(wd==1){
-			frontLeftWheelCollider.brakeTorque = brakeForce;
-			frontRightWheelCollider.brakeTorque = brakeForce;
-		}
-		else{
-			frontLeftWheelCollider.brakeTorque = brakeForce;
-			frontRightWheelCollider.brakeTorque = brakeForce;
-			rearLeftWheelCollider.brakeTorque = brakeForce;
-			rearRightWheelCollider.brakeTorque = brakeForce;
-		}
-		
-		brakeForceRear = isBreaking ? 9000f : 0f;
         rearLeftWheelCollider.brakeTorque = brakeForceRear;
         rearRightWheelCollider.brakeTorque = brakeForceRear;
-		
     }
-	
+
 	private void HandleSlip()
 	{
 		float slip_factor;
@@ -165,17 +170,20 @@ public class CarController : MonoBehaviour
 		rearLeftSlip = Mathf.Lerp(rearLeftSlip, CalculateRearSlip(rearLeftWheelCollider), Time.fixedDeltaTime / slip_factor);
 		rearRightSlip = Mathf.Lerp(rearRightSlip, CalculateRearSlip(rearRightWheelCollider), Time.fixedDeltaTime / slip_factor);
 		
-		Debug.Log("slip: "+frontLeftSlip+frontRightSlip+rearLeftSlip+rearRightSlip);
-		
-		frontLeftSFX.volume = frontLeftSlip;
-		frontLeftSFX.pitch = frontLeftSlip + .1f;
-		frontRightSFX.volume = frontRightSlip;
-		frontRightSFX.pitch = frontRightSlip + .1f;
-		rearLeftSFX.volume = rearLeftSlip;
-		rearLeftSFX.pitch = rearLeftSlip - .2f;
-		rearRightSFX.volume = rearRightSlip;
-		rearRightSFX.pitch = rearRightSlip - .2f;
-	}
+        UpdateWheelSound(frontLeftSFX, frontLeftSlip, 0.1f);
+        UpdateWheelSound(frontRightSFX, frontRightSlip, 0.1f);
+        UpdateWheelSound(rearLeftSFX, rearLeftSlip, -0.2f);
+        UpdateWheelSound(rearRightSFX, rearRightSlip, -0.2f);
+    }
+
+    private static void UpdateWheelSound(AudioSource source, float slip, float pitchOffset)
+    {
+        if (source == null)
+            return;
+
+        source.volume = Mathf.Clamp01(slip);
+        source.pitch = Mathf.Clamp(slip + pitchOffset, 0.1f, 3f);
+    }
 
     private void UpdateWheels()
     {
@@ -194,92 +202,44 @@ public class CarController : MonoBehaviour
         trans.position = pos;
     }
 	
-	private void DisplayCenterOfMass()
+    private void HandleGear()
     {
-        Rigidbody carRigidbody = GetComponent<Rigidbody>();
+        float speed = carRigidbody.velocity.magnitude * 3.6f;
+        int topGear = Mathf.Min(gearRatios.Length, gearSpeeds.Length) - 1;
+        currentGear = Mathf.Clamp(currentGear, 0, topGear);
 
-        if (carRigidbody != null)
+        if (currentGear < topGear && speed > gearSpeeds[currentGear + 1] && clutch < 0.2f)
         {
-            Vector3 centerOfMass = carRigidbody.centerOfMass;
-            Debug.Log("Center of Mass: " + centerOfMass);
+            engineRPM /= 3f;
+            PlayShiftSound(gear_up);
+            frontLeftWheelCollider.motorTorque /= 1.65f;
+            frontRightWheelCollider.motorTorque /= 1.65f;
+            currentGear++;
+            clutch = 10f;
         }
-        else
+
+        if (currentGear > 0 && speed < gearSpeeds[currentGear] - 5f && clutch_down < 0.2f)
         {
-            Debug.LogError("Rigidbody component not found!");
+            PlayShiftSound(gear_down);
+            currentGear--;
         }
+
+        ApplyTorque(Throttle * motorForce * gearRatios[currentGear]);
+        maxRPM = motorForce * gearRatios[0] + 100f * currentGear;
+        maxRPM2 = motorForce * gearRatios[currentGear] + 100f * currentGear;
+        clutch = clutch > 0.2f ? Mathf.Lerp(clutch, 0f, Time.fixedDeltaTime / 0.1f) : 0f;
+        clutch_down = clutch_down > 0.2f ? Mathf.Lerp(clutch_down, 0f, Time.fixedDeltaTime / 0.2f) : 0f;
     }
-	
-	private void HandleGear()
-   {
-		float speed = GetComponent<Rigidbody>().velocity.magnitude * 3.6f; // скорость в км/ч
 
-		
-		if (speed > gearSpeeds[currentGear+1] && currentGear < gearSpeeds.Length - 1)
-		{
-			//if (Input.GetKeyDown(KeyCode.G))
-			//{
-				//engineRPM = engineRPM/3;
-				if(clutch<.2f){
-					engineRPM = engineRPM/3f;
-					gear_switch.clip = gear_up;
-					gear_switch.Play();
-					
-					frontLeftWheelCollider.motorTorque = frontLeftWheelCollider.motorTorque/1.65f;
-					frontRightWheelCollider.motorTorque = frontRightWheelCollider.motorTorque/1.65f;
-					
-					currentGear++;
-					
-					clutch = 10;
-				}
-				
-				
-			//}
-		}
-		
-		if (speed < gearSpeeds[currentGear]-5 && currentGear > 0)
-		{
-			//if (Input.GetKeyDown(KeyCode.G))
-			//{
-			if(clutch_down<.2f){
-				gear_switch.clip = gear_down;
-				gear_switch.Play();
-				currentGear--;
-			}
-			//}
-		}
+    private void PlayShiftSound(AudioClip clip)
+    {
+        if (gear_switch == null || clip == null)
+            return;
 
-		/*float gearRatio = gearRatios[currentGear];
-		frontLeftWheelCollider.motorTorque = verticalInput * motorForce * gearRatio;
-		frontRightWheelCollider.motorTorque = verticalInput * motorForce * gearRatio;
-		//rearLeftWheelCollider.motorTorque = verticalInput * motorForce * gearRatio;
-		//rearRightWheelCollider.motorTorque = verticalInput * motorForce * gearRatio;
-		engineRPM = verticalInput * motorForce * gearRatio;*/
-		
-		//float targetTorque;
-		
-		
-		float targetTorque = verticalInput * motorForce * gearRatios[currentGear];
-		if(targetTorque<0f){
-			targetTorque=0f;
-		}
-		ApplyTorque(targetTorque);
-		maxRPM = motorForce * gearRatios[0] + 100f * currentGear;
-		maxRPM2 = motorForce * gearRatios[currentGear] + 100f * currentGear;
-		
-		if(clutch>.2f){
-			clutch = Mathf.Lerp(clutch, 0, Time.fixedDeltaTime/.1f);
-		}
-		else{
-			clutch = 0f;
-		}
-		if(clutch_down>.2f){
-			clutch_down = Mathf.Lerp(clutch_down, 0, Time.fixedDeltaTime/.1f);
-		}
-		else{
-			clutch_down = 0f;
-		}
-	}
-	
+        gear_switch.clip = clip;
+        gear_switch.Play();
+    }
+
 	private void ApplyTorque(float targetTorque)
 	{
 		float smoothTime = 0.6f; // Время плавного изменения, можно регулировать
