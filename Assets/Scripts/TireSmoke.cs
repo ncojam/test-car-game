@@ -19,11 +19,11 @@ internal sealed class TireSmoke
         var main = particles.main;
         main.loop = true;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.startLifetime = new ParticleSystem.MinMaxCurve(0.95f, 2.1f);
+        main.startLifetime = new ParticleSystem.MinMaxCurve(1.1f, 2.5f);
         main.startSize = new ParticleSystem.MinMaxCurve(0.55f, 1.05f);
         main.startRotation = new ParticleSystem.MinMaxCurve(-Mathf.PI, Mathf.PI);
         main.startSpeed = 0f;
-        main.maxParticles = 450;
+        main.maxParticles = 600;
 
         var emission = particles.emission;
         emission.enabled = false;
@@ -35,7 +35,7 @@ internal sealed class TireSmoke
         var gradient = new Gradient();
         gradient.SetKeys(
             new[] { new GradientColorKey(new Color(0.88f, 0.88f, 0.88f), 0f), new GradientColorKey(Color.white, 1f) },
-            new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(0.78f, 0.14f), new GradientAlphaKey(0f, 1f) });
+            new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(0.86f, 0.12f), new GradientAlphaKey(0f, 1f) });
         color.color = gradient;
 
         var size = particles.sizeOverLifetime;
@@ -58,7 +58,7 @@ internal sealed class TireSmoke
             return;
         }
 
-        pending += amount * 140f * step;
+        pending += Mathf.Sqrt(amount) * 205f * step;
         int count = Mathf.FloorToInt(pending);
         pending -= count;
 

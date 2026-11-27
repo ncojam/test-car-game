@@ -243,30 +243,24 @@ public class CarController : MonoBehaviour
 
     private void UpdateTireEffects(Wheel wheel, float speed, float step)
     {
-        float amount = 0f;
+        float slip = 0f;
         if (CanDrive && wheel.Grounded)
         {
             float forwardSlip = wheel.Contact.forwardSlip;
-            float sideSlipAbs = Mathf.Abs(wheel.Contact.sidewaysSlip);
+            float sidewaysSlip = Mathf.Abs(wheel.Contact.sidewaysSlip);
+            float spin = wheel.IsDriven && wheel.Collider.motorTorque > 0f
+                ? Mathf.InverseLerp(0.1f, 0.52f, -forwardSlip) : 0f;
+            float skid = Braking > 0.18f && speed > 1.5f
+                ? Mathf.InverseLerp(0.05f, 0.32f, Mathf.Max(forwardSlip, sidewaysSlip)) : 0f;
+            float drift = speed > 2f ? Mathf.InverseLerp(0.22f, 0.8f, sidewaysSlip) : 0f;
 
-            float spin = wheel.IsDriven && throttle > 0.65f && wheel.Collider.motorTorque > 0f
-                ? Mathf.InverseLerp(0.14f, 0.6f, -forwardSlip) : 0f;
-
-            float skid = Braking > 0.35f && speed > 1.5f
-                ? Mathf.InverseLerp(0.05f, 0.32f, Mathf.Max(forwardSlip, sideSlipAbs)) : 0f;
-
-            // Усиленный бёрнаут при газе + тормозе/ручнике на малой скорости
-            float burnout = wheel.IsDriven && throttle > 0.7f && (brake > 0.3f || handbrake) && speed < 8f ? 1f : 0f;
-
-            amount = Mathf.Max(spin, skid, burnout);
+            slip = Mathf.Max(Mathf.Max(spin, skid), drift);
         }
 
-        wheel.Smoke.Update(wheel.Contact, amount, step);
+        wheel.Smoke.Update(wheel.Contact, slip, step);
         if (wheel.Sound != null)
         {
-            float sideSlip = wheel.Grounded && CanDrive && speed > 2f
-                ? Mathf.InverseLerp(0.22f, 0.8f, Mathf.Abs(wheel.Contact.sidewaysSlip)) : 0f;
-            wheel.Sound.volume = Mathf.MoveTowards(wheel.Sound.volume, Mathf.Max(sideSlip, amount), step * 4f);
+            wheel.Sound.volume = Mathf.MoveTowards(wheel.Sound.volume, slip, step * 4f);
             wheel.Sound.pitch = 0.68f + 0.42f * wheel.Sound.volume;
         }
     }

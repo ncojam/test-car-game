@@ -1,16 +1,16 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-[RequireComponent(typeof(Camera))]
+[RequireComponent(typeof(Camera), typeof(AudioListener))]
 [DefaultExecutionOrder(100)]
 public class CameraFollow : MonoBehaviour
 {
     [SerializeField] private Transform target;
 
     [Header("Дистанция")]
-    [SerializeField] private float distance = 5.2f;
-    [SerializeField] private float brakingDistance = 4.2f;
-    [SerializeField] private float maxSpeedPullback = 0.75f;
+    [SerializeField] private float pivotHeight = 1.38f;
+    [SerializeField, Range(0f, 0.4f)] private float brakingPullIn = 0.25f;
+    [SerializeField, Min(0f)] private float maxSpeedPullback = 0.35f;
     [SerializeField] private float maxSpeedKphForEffects = 140f;
 
     [Header("Плавность и повороты")]
@@ -20,7 +20,6 @@ public class CameraFollow : MonoBehaviour
     [SerializeField] private float maxRoll = 5.5f;
 
     [Header("Обзор и автовозврат")]
-    [SerializeField] private float defaultPitch = 12f;
     [SerializeField] private float mouseSensitivity = 0.19f;
     [SerializeField] private float legacyMouseSensitivity = 2.5f;
     [SerializeField] private float stickDegreesPerSecond = 145f;
@@ -28,13 +27,22 @@ public class CameraFollow : MonoBehaviour
     [SerializeField] private float autoReturnSpeed = 3.5f;
 
     [Header("Динамический FOV")]
-    [SerializeField] private float baseFov = 60f;
-    [SerializeField] private float maxFov = 76f;
+    [SerializeField, Range(0f, 40f)] private float speedFovIncrease = 22f;
     [SerializeField] private float fovLerpSpeed = 5f;
 
     private readonly RaycastHit[] hits = new RaycastHit[16];
     private Camera cam;
+    private AudioListener listener;
     private CarController car;
+    private Vector3 startLocalPosition;
+    private Quaternion startLocalRotation;
+    private Vector3 startDirection;
+    private Quaternion startRotation;
+    private Vector3 pitchAxis;
+    private float startDistance;
+    private float startFov;
+    private float startPitch;
+    private bool viewActive;
     private float heading;
     private float orbitYaw;
     private float orbitPitch;
@@ -49,6 +57,24 @@ public class CameraFollow : MonoBehaviour
     private void Awake()
     {
         cam = GetComponent<Camera>();
+        listener = GetComponent<AudioListener>();
+        if (target == null)
+            return;
+
+        // Capture the pose once, before the player or vehicle moves.
+        car = target.GetComponent<CarController>();
+        startLocalPosition = transform.localPosition;
+        startLocalRotation = transform.localRotation;
+        startFov = cam.fieldOfView;
+        Quaternion inverseHeading = Quaternion.Inverse(Quaternion.Euler(0f, target.eulerAngles.y, 0f));
+        Vector3 offset = inverseHeading * (transform.position - GetPivot());
+        startDistance = Mathf.Max(0.25f, offset.magnitude);
+        startDirection = offset.sqrMagnitude > 0.001f ? offset.normalized : Vector3.back;
+        startRotation = inverseHeading * transform.rotation;
+        pitchAxis = Vector3.Cross(startDirection, Vector3.up).normalized;
+        if (pitchAxis.sqrMagnitude < 0.001f)
+            pitchAxis = Vector3.right;
+        startPitch = Mathf.Asin(startDirection.y) * Mathf.Rad2Deg;
     }
 
     private void OnEnable()
@@ -56,29 +82,33 @@ public class CameraFollow : MonoBehaviour
         if (target == null)
             return;
 
-        car = target.GetComponent<CarController>();
         heading = target.eulerAngles.y;
         orbitYaw = 0f;
-        orbitPitch = defaultPitch;
+        orbitPitch = 0f;
         orbitIdleTimer = autoReturnDelay;
-        currentDistance = visibleDistance = distance;
+        currentDistance = visibleDistance = startDistance;
         roll = 0f;
         pivot = GetPivot();
-
-        if (cam != null)
-            cam.fieldOfView = baseFov;
 
         previousLock = Cursor.lockState;
         previousCursorVisible = Cursor.visible;
         CaptureCursor();
         UpdateView(0f, true);
+        cam.enabled = true;
+        listener.enabled = true;
+        viewActive = true;
     }
 
     private void OnDisable()
     {
-        if (target == null)
+        if (!viewActive)
             return;
 
+        viewActive = false;
+        listener.enabled = false;
+        cam.enabled = false;
+        cam.fieldOfView = startFov;
+        transform.SetLocalPositionAndRotation(startLocalPosition, startLocalRotation);
         Cursor.lockState = previousLock;
         Cursor.visible = previousCursorVisible;
     }
@@ -113,7 +143,8 @@ public class CameraFollow : MonoBehaviour
             if (look.sqrMagnitude > 0.0001f)
             {
                 orbitYaw = Mathf.Repeat(orbitYaw + look.x + 180f, 360f) - 180f;
-                orbitPitch = Mathf.Clamp(orbitPitch - look.y, -5f, 65f);
+                orbitPitch = Mathf.Clamp(startPitch + orbitPitch - look.y,
+                    Mathf.Min(startPitch, -5f), Mathf.Max(startPitch, 65f)) - startPitch;
                 orbitIdleTimer = 0f;
             }
             else
@@ -123,14 +154,14 @@ public class CameraFollow : MonoBehaviour
                 {
                     float ret = 1f - Mathf.Exp(-autoReturnSpeed * delta);
                     orbitYaw = Mathf.LerpAngle(orbitYaw, 0f, ret);
-                    orbitPitch = Mathf.Lerp(orbitPitch, defaultPitch, ret);
+                    orbitPitch = Mathf.Lerp(orbitPitch, 0f, ret);
                 }
             }
 
-            if (Gamepad.current?.rightStickButton.wasPressedThisFrame == true)
+            if (VehicleInput.ResetLookPressed)
             {
                 orbitYaw = 0f;
-                orbitPitch = defaultPitch;
+                orbitPitch = 0f;
                 orbitIdleTimer = autoReturnDelay;
             }
         }
@@ -146,37 +177,36 @@ public class CameraFollow : MonoBehaviour
 
         float braking = car != null ? car.Braking : 0f;
         float turnRate = car != null ? car.TurnRate : 0f;
-        float speedNorm = car != null ? Mathf.Clamp01(car.SpeedKph / maxSpeedKphForEffects) : 0f;
+        float speedNorm = car != null ? Mathf.Clamp01(car.SpeedKph / Mathf.Max(1f, maxSpeedKphForEffects)) : 0f;
 
         // Запаздывание поворота камеры за машиной
         heading = Mathf.LerpAngle(heading, target.eulerAngles.y, headingBlend);
         pivot = Vector3.Lerp(pivot, GetPivot(), pivotBlend);
 
         // Контролируемый отъезд назад от скорости + приближение при торможении
-        float targetDistance = Mathf.Lerp(distance + speedNorm * maxSpeedPullback, brakingDistance, braking);
-        currentDistance = Mathf.Lerp(currentDistance, targetDistance, distBlend);
+        float brakingDistance = startDistance * (1f - brakingPullIn);
+        float targetDistance = Mathf.Lerp(startDistance + speedNorm * maxSpeedPullback, brakingDistance, braking);
+        currentDistance = snap ? startDistance : Mathf.Lerp(currentDistance, targetDistance, distBlend);
 
         // Легкий крен в поворотах
         float targetRoll = Mathf.Clamp(-turnRate * 3.2f, -maxRoll, maxRoll);
-        roll = Mathf.Lerp(roll, targetRoll, distBlend);
+        roll = snap ? 0f : Mathf.Lerp(roll, targetRoll, distBlend);
 
         // Динамический FOV
-        if (cam != null)
-        {
-            float targetFov = Mathf.Lerp(baseFov, maxFov, speedNorm);
-            cam.fieldOfView = snap ? targetFov : Mathf.Lerp(cam.fieldOfView, targetFov, 1f - Mathf.Exp(-fovLerpSpeed * delta));
-        }
+        float targetFov = Mathf.Min(170f, startFov + speedNorm * speedFovIncrease);
+        cam.fieldOfView = snap ? startFov : Mathf.Lerp(cam.fieldOfView, targetFov, 1f - Mathf.Exp(-fovLerpSpeed * delta));
 
-        Quaternion orbit = Quaternion.Euler(orbitPitch, heading + orbitYaw, 0f);
-        Vector3 direction = orbit * Vector3.back;
+        Quaternion orbit = Quaternion.Euler(0f, heading + orbitYaw, 0f)
+            * Quaternion.AngleAxis(orbitPitch, pitchAxis);
+        Vector3 direction = orbit * startDirection;
         float clearance = FindClearance(direction);
         visibleDistance = clearance < visibleDistance ? clearance : Mathf.Lerp(visibleDistance, clearance, distBlend);
 
-        Quaternion rotation = orbit * Quaternion.AngleAxis(roll, Vector3.forward);
+        Quaternion rotation = orbit * startRotation * Quaternion.AngleAxis(roll, Vector3.forward);
         transform.SetPositionAndRotation(pivot + direction * visibleDistance, rotation);
     }
 
-    private Vector3 GetPivot() => target.position + Vector3.up * 1.38f;
+    private Vector3 GetPivot() => target.position + Vector3.up * pivotHeight;
 
     private float FindClearance(Vector3 direction)
     {

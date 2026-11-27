@@ -10,6 +10,8 @@ internal sealed class EngineSynthesizer
         public double Position;
         public double Step;
         public float Gain;
+        public int Age;
+        public int Frames;
     }
 
     private readonly float outputRate;
@@ -21,6 +23,9 @@ internal sealed class EngineSynthesizer
 
     private readonly float[] sampleData;
     private readonly float sampleRateRatio;
+    private readonly int maxVoiceFrames;
+    private readonly int fadeOutFrames;
+    private readonly int fadeInFrames;
     private readonly float[] pitchRatios;
     private readonly Voice[] voices = new Voice[MaxVoices];
 
@@ -32,8 +37,8 @@ internal sealed class EngineSynthesizer
     private float smoothedRpm = 900f;
     private float smoothedLoad;
     private float smoothedGain;
-    private float rpmPitchFactor;
-    private float firingsPerRev;
+    private readonly float rpmPitchFactor;
+    private readonly float firingsPerRev;
     private uint random = 0xc1a83f45;
 
     public EngineSynthesizer(
@@ -56,6 +61,10 @@ internal sealed class EngineSynthesizer
         drive = Math.Max(0.1f, distortionDrive);
         rpmPitchFactor = rpmPitchShift;
         firingsPerRev = Math.Max(0.5f, firingsPerRevolution);
+        // Finish each voice before its slot can be reused at the highest firing rate.
+        maxVoiceFrames = (int)(MaxVoices * outputRate / (redlineRpm * firingsPerRev / 60f)) - 2;
+        fadeOutFrames = Math.Max(1, outputSampleRate * 5 / 1000);
+        fadeInFrames = Math.Max(1, outputSampleRate / 2000);
 
         sampleData = kickSamples ?? Array.Empty<float>();
         sampleRateRatio = kickSampleRate > 0 ? (float)kickSampleRate / outputSampleRate : 1f;
@@ -68,12 +77,12 @@ internal sealed class EngineSynthesizer
             pitchRatios[i] = (float)Math.Pow(2d, (semitonePattern[i] + basePitchSemitones) / 12d);
     }
 
-    public void Render(float[] samples, float rpm, float load, float gain)
+    public void Render(float[] samples, int channels, float rpm, float load, float gain)
     {
-        rpm = Math.Max(650f, rpm);
+        rpm = Math.Max(650f, Math.Min(limiterRpm + 35f, rpm));
         bool hasSample = sampleData.Length > 1;
 
-        for (int i = 0; i < samples.Length; i++)
+        for (int i = 0; i < samples.Length; i += channels)
         {
             smoothedRpm += (rpm - smoothedRpm) * controlsBlend;
             smoothedLoad += (load - smoothedLoad) * controlsBlend;
@@ -102,12 +111,14 @@ internal sealed class EngineSynthesizer
                     float rpmPitch = (float)Math.Pow(2d, (rpmNorm * rpmPitchFactor) / 12d);
                     float jitter = 0.985f + 0.03f * WhiteNoise01();
 
+                    double pitchStep = sampleRateRatio * pitchRatios[cylinder] * rpmPitch * jitter;
                     voices[nextVoice] = new Voice
                     {
                         Active = true,
                         Position = 0d,
-                        Step = sampleRateRatio * pitchRatios[cylinder] * rpmPitch * jitter,
-                        Gain = 0.72f + 0.38f * smoothedLoad
+                        Step = pitchStep,
+                        Gain = 0.72f + 0.38f * smoothedLoad,
+                        Frames = Math.Min(maxVoiceFrames, (int)Math.Ceiling((sampleData.Length - 1) / pitchStep))
                     };
                     nextVoice = (nextVoice + 1) % MaxVoices;
                 }
@@ -120,21 +131,25 @@ internal sealed class EngineSynthesizer
                 int lastIndex = sampleData.Length - 1;
                 for (int v = 0; v < MaxVoices; v++)
                 {
-                    if (!voices[v].Active)
+                    ref Voice voice = ref voices[v];
+                    if (!voice.Active)
                         continue;
 
-                    double pos = voices[v].Position;
+                    double pos = voice.Position;
                     int idx = (int)pos;
-                    if (idx >= lastIndex)
+                    if (voice.Age >= voice.Frames || idx >= lastIndex)
                     {
-                        voices[v].Active = false;
+                        voice.Active = false;
                         continue;
                     }
 
                     float frac = (float)(pos - idx);
                     float s = sampleData[idx] + (sampleData[idx + 1] - sampleData[idx]) * frac;
-                    mixed += s * voices[v].Gain;
-                    voices[v].Position = pos + voices[v].Step;
+                    float attack = Math.Min(1f, (float)(voice.Age + 1) / fadeInFrames);
+                    float release = Math.Min(1f, (float)(voice.Frames - voice.Age - 1) / fadeOutFrames);
+                    mixed += s * voice.Gain * attack * release;
+                    voice.Position = pos + voice.Step;
+                    voice.Age++;
                 }
             }
 
@@ -149,7 +164,9 @@ internal sealed class EngineSynthesizer
             // Мягкий дисторшн (насыщение, как в FL Studio)
             float driven = (mixed * 0.55f + whine) * drive;
             float saturated = (float)Math.Tanh(driven);
-            samples[i] = smoothedGain * saturated;
+            float value = smoothedGain * saturated;
+            for (int channel = 0; channel < channels; channel++)
+                samples[i + channel] = value;
         }
     }
 

@@ -1,4 +1,3 @@
-using System.Threading;
 using UnityEngine;
 
 [RequireComponent(typeof(CarController))]
@@ -24,19 +23,16 @@ public sealed class EngineAudio : MonoBehaviour
 
     private CarController car;
     private AudioSource source;
-    private AudioClip clip;
-    private EngineSynthesizer synthesizer;
-    private float rpm;
-    private float load;
-    private float gain;
+    private AudioClip carrier;
+    private EngineAudioOutput output;
 
     private void Awake()
     {
         car = GetComponent<CarController>();
-        int rate = Mathf.Max(24000, AudioSettings.outputSampleRate);
+        int rate = AudioSettings.outputSampleRate;
 
         float[] kickPcm = ExtractMonoPcm(kickSample, out int kickRate);
-        synthesizer = new EngineSynthesizer(
+        var synthesizer = new EngineSynthesizer(
             rate,
             CarController.RedlineRpm,
             kickPcm,
@@ -48,14 +44,16 @@ public sealed class EngineAudio : MonoBehaviour
             supercharger,
             firingsPerRevolution);
 
-        clip = AudioClip.Create("Procedural Kick Engine", rate * 2, 1, rate, true, ReadAudio);
+        // A silent non-streaming carrier keeps a spatial AudioSource on the DSP graph.
+        // The filter replaces its samples immediately before playback.
+        carrier = AudioClip.Create("Engine DSP carrier", 1024, 1, rate, false);
 
         var emitter = new GameObject("Engine sound");
         emitter.transform.SetParent(transform, false);
         emitter.transform.localPosition = new Vector3(0f, 0.75f, 1.45f);
         source = emitter.AddComponent<AudioSource>();
         source.playOnAwake = false;
-        source.clip = clip;
+        source.clip = carrier;
         source.loop = true;
         source.spatialBlend = 1f;
         source.dopplerLevel = 0f;
@@ -63,6 +61,8 @@ public sealed class EngineAudio : MonoBehaviour
         source.maxDistance = 75f;
         source.rolloffMode = AudioRolloffMode.Linear;
         source.volume = volume;
+        output = emitter.AddComponent<EngineAudioOutput>();
+        output.Initialize(synthesizer);
     }
 
     private static float[] ExtractMonoPcm(AudioClip sample, out int sampleRate)
@@ -73,11 +73,17 @@ public sealed class EngineAudio : MonoBehaviour
             return System.Array.Empty<float>();
         }
 
+        if (sample.loadState == AudioDataLoadState.Unloaded)
+            sample.LoadAudioData();
+
         sampleRate = sample.frequency;
         int channels = sample.channels;
         float[] raw = new float[sample.samples * channels];
         if (!sample.GetData(raw, 0))
+        {
+            Debug.LogWarning($"Engine kick '{sample.name}' could not be read. Use Decompress On Load.");
             return System.Array.Empty<float>();
+        }
 
         if (channels == 1)
             return raw;
@@ -107,9 +113,7 @@ public sealed class EngineAudio : MonoBehaviour
 
     private void UpdateControls()
     {
-        Volatile.Write(ref rpm, car.EngineRpm);
-        Volatile.Write(ref load, car.EngineLoad);
-        Volatile.Write(ref gain, car.IsDriving ? (GameManager.paused ? 0.18f : 1f) : 0f);
+        output.SetControls(car.EngineRpm, car.EngineLoad, car.IsDriving ? (GameManager.paused ? 0.18f : 1f) : 0f);
     }
 
     private void OnDisable()
@@ -121,12 +125,7 @@ public sealed class EngineAudio : MonoBehaviour
     {
         if (source != null)
             Destroy(source.gameObject);
-        if (clip != null)
-            Destroy(clip);
-    }
-
-    private void ReadAudio(float[] samples)
-    {
-        synthesizer.Render(samples, Volatile.Read(ref rpm), Volatile.Read(ref load), Volatile.Read(ref gain));
+        if (carrier != null)
+            Destroy(carrier);
     }
 }

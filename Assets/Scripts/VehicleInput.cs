@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 
 internal struct VehicleInput
 {
@@ -15,49 +16,29 @@ internal struct VehicleInput
     {
         get
         {
-            if (Gamepad.current != null)
+            if (Gamepad.current != null && Gamepad.current.enabled)
                 return Gamepad.current;
-            return Gamepad.all.Count > 0 ? Gamepad.all[0] : null;
+            foreach (Gamepad pad in Gamepad.all)
+                if (pad.enabled)
+                    return pad;
+            return null;
         }
     }
 
-    public static bool InteractPressed
-    {
-        get
-        {
-            Gamepad pad = ActivePad;
-            return Input.GetKeyDown(KeyCode.E)
-                || (pad != null && pad.buttonWest.wasPressedThisFrame)
-                || (pad == null && Input.GetKeyDown(KeyCode.JoystickButton2));
-        }
-    }
+    public static bool InteractPressed => Input.GetKeyDown(KeyCode.E)
+        || (ActivePad?.buttonWest.wasPressedThisFrame
+            ?? (LinuxPad?.West.wasPressedThisFrame ?? Input.GetKeyDown(KeyCode.JoystickButton2)));
 
-    public static Vector2 MoveStick
-    {
-        get
-        {
-            Gamepad pad = ActivePad;
-            if (pad != null)
-                return ApplyStickDeadzone(pad.leftStick.ReadValue());
+    public static bool ResetLookPressed => ActivePad?.rightStickButton.wasPressedThisFrame
+        ?? (LinuxPad?.RightStickClick?.wasPressedThisFrame ?? false);
 
-            return ApplyStickDeadzone(new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical")));
-        }
-    }
+    public static Vector2 MoveStick => ApplyStickDeadzone(ActivePad?.leftStick.ReadValue()
+        ?? LinuxPad?.Move
+        ?? new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical")));
 
-    public static Vector2 LookStick
-    {
-        get
-        {
-            Gamepad pad = ActivePad;
-            if (pad != null)
-                return ApplyStickDeadzone(pad.rightStick.ReadValue());
-
-            if (!HasLegacyPad())
-                return Vector2.zero;
-
-            return ApplyStickDeadzone(new Vector2(Input.GetAxisRaw("StickR X"), -Input.GetAxisRaw("StickR Y")));
-        }
-    }
+    public static Vector2 LookStick => ApplyStickDeadzone(ActivePad?.rightStick.ReadValue()
+        ?? LinuxPad?.Look
+        ?? (HasLegacyPad() ? new Vector2(Input.GetAxisRaw("StickR X"), -Input.GetAxisRaw("StickR Y")) : Vector2.zero));
 
     private static Vector2 ApplyStickDeadzone(Vector2 raw)
     {
@@ -75,9 +56,8 @@ internal struct VehicleInput
     private static bool signedGas;
     private static bool signedBrake;
 
-    private static float Pedal(string axis, ref bool signed)
+    private static float Pedal(float value, ref bool signed)
     {
-        float value = Input.GetAxisRaw(axis);
         if (value < -0.8f)
             signed = true;
         float norm = signed ? Mathf.InverseLerp(-1f, 1f, value) : Mathf.Clamp01(value);
@@ -96,14 +76,21 @@ internal struct VehicleInput
             input.Steer = ApplyStickDeadzone(pad.leftStick.ReadValue()).x;
             input.Handbrake = pad.buttonSouth.isPressed;
         }
+        else if (LinuxPad is LinuxController linux)
+        {
+            input.Gas = linux.Gas;
+            input.Brake = linux.Brake;
+            input.Steer = ApplyStickDeadzone(linux.Move).x;
+            input.Handbrake = linux.South.isPressed;
+        }
         else if (HasLegacyPad())
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-            input.Gas = Pedal("Car RT Windows", ref signedGas);
-            input.Brake = Pedal("Car LT Windows", ref signedBrake);
+            input.Gas = Pedal(Input.GetAxisRaw("Car RT Windows"), ref signedGas);
+            input.Brake = Pedal(Input.GetAxisRaw("Car LT Windows"), ref signedBrake);
 #else
-            input.Gas = Pedal("Car RT", ref signedGas);
-            input.Brake = Pedal("Car LT", ref signedBrake);
+            input.Gas = Pedal(Input.GetAxisRaw("Car RT"), ref signedGas);
+            input.Brake = Pedal(Input.GetAxisRaw("Car LT"), ref signedBrake);
 #endif
             input.Steer = ApplyStickDeadzone(new Vector2(Input.GetAxisRaw("Horizontal"), 0f)).x;
             input.Handbrake = Input.GetKey(KeyCode.JoystickButton0);
@@ -138,5 +125,105 @@ internal struct VehicleInput
             }
         }
         return legacyDevice != null;
+    }
+
+#if UNITY_EDITOR_LINUX || UNITY_STANDALONE_LINUX
+    private static LinuxController linuxPad;
+    private static float nextLinuxDeviceCheck;
+#endif
+
+    private static LinuxController LinuxPad
+    {
+        get
+        {
+#if UNITY_EDITOR_LINUX || UNITY_STANDALONE_LINUX
+            if (linuxPad != null && linuxPad.Device.added && linuxPad.Device.enabled)
+                return linuxPad;
+
+            linuxPad = null;
+            if (Time.unscaledTime < nextLinuxDeviceCheck)
+                return null;
+
+            nextLinuxDeviceCheck = Time.unscaledTime + 0.5f;
+            foreach (InputDevice device in InputSystem.devices)
+            {
+                if (!device.enabled || device.description.interfaceName != "Linux")
+                    continue;
+                linuxPad = LinuxController.TryCreate(device);
+                if (linuxPad != null)
+                    break;
+            }
+            return linuxPad;
+#else
+            return null;
+#endif
+        }
+    }
+
+    // Input System 1.7 builds Linux device layouts from the reported evdev usages.
+    // These controls can exist on an InputDevice that has no Gamepad layout.
+    private sealed class LinuxController
+    {
+        public InputDevice Device { get; }
+        public ButtonControl West { get; }
+        public ButtonControl South { get; }
+        public ButtonControl RightStickClick { get; }
+        public Vector2 Move => leftStick?.ReadValue() ?? new Vector2(leftX.ReadValue(), leftY.ReadValue());
+        public Vector2 Look => new Vector2(rightX.ReadValue(), -rightY.ReadValue());
+        public float Gas => Pedal(gas.ReadValue(), ref gasSigned);
+        public float Brake => Pedal(brake.ReadValue(), ref brakeSigned);
+
+        private readonly StickControl leftStick;
+        private readonly AxisControl leftX;
+        private readonly AxisControl leftY;
+        private readonly AxisControl rightX;
+        private readonly AxisControl rightY;
+        private readonly AxisControl gas;
+        private readonly AxisControl brake;
+        private bool gasSigned;
+        private bool brakeSigned;
+
+        private LinuxController(InputDevice device, StickControl stick, AxisControl x, AxisControl y,
+            AxisControl rx, AxisControl ry, AxisControl gasAxis, AxisControl brakeAxis,
+            ButtonControl west, ButtonControl south)
+        {
+            Device = device;
+            leftStick = stick;
+            leftX = x;
+            leftY = y;
+            rightX = rx;
+            rightY = ry;
+            gas = gasAxis;
+            brake = brakeAxis;
+            West = west;
+            South = south;
+            RightStickClick = device.TryGetChildControl("ThumbRight") as ButtonControl;
+            gasSigned = gas.ReadValue() < -0.8f;
+            brakeSigned = brake.ReadValue() < -0.8f;
+        }
+
+        public static LinuxController TryCreate(InputDevice device)
+        {
+            var stick = device.TryGetChildControl("Stick") as StickControl;
+            var x = device.TryGetChildControl("X") as AxisControl;
+            if (x is ButtonControl)
+                x = null;
+            var y = device.TryGetChildControl("Y") as AxisControl;
+            if (y is ButtonControl)
+                y = null;
+            var rx = device.TryGetChildControl("RotateX") as AxisControl;
+            var ry = device.TryGetChildControl("RotateY") as AxisControl;
+            var gas = device.TryGetChildControl("Gas") as AxisControl
+                ?? device.TryGetChildControl("RotateZ") as AxisControl;
+            var brake = device.TryGetChildControl("Brake") as AxisControl
+                ?? device.TryGetChildControl("Z") as AxisControl;
+            var west = device.TryGetChildControl("X") as ButtonControl;
+            var south = device.TryGetChildControl("A") as ButtonControl;
+            if ((stick == null && (x == null || y == null)) || rx == null || ry == null
+                || gas == null || brake == null || west == null || south == null)
+                return null;
+
+            return new LinuxController(device, stick, x, y, rx, ry, gas, brake, west, south);
+        }
     }
 }

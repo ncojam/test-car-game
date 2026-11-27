@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 //using UnityEngine.N3DS;
 //using UnityEngine.N3DS.GamePad; //that's for analog input values
@@ -534,7 +533,7 @@ public class PlayerController : MonoBehaviour {
 
         horizontalInput = Input.GetAxisRaw("Horizontal");
         verticalInput = Input.GetAxisRaw("Vertical");
-        Vector2 padMove = Gamepad.current?.leftStick.ReadValue() ?? Vector2.zero;
+        Vector2 padMove = VehicleInput.MoveStick;
         if (padMove.sqrMagnitude > horizontalInput * horizontalInput + verticalInput * verticalInput)
         {
             horizontalInput = padMove.x;
@@ -640,9 +639,9 @@ public class PlayerController : MonoBehaviour {
         playerModel.SetActive(false);
         shadow.SetActive(false);
         controller.enabled = false;
-        playerView.enabled = false;
-        carView.enabled = true;
+        SetPlayerViewActive(false);
         car.SetDriving(true);
+        carView.enabled = true;
         driving = true;
     }
 
@@ -661,8 +660,17 @@ public class PlayerController : MonoBehaviour {
         playerModel.SetActive(wasModelVisible);
         carView.enabled = false;
         playerView.transform.SetPositionAndRotation(position + playerCameraOffset, playerCameraRotation);
-        playerView.enabled = true;
+        SetPlayerViewActive(true);
         driving = false;
+    }
+
+    private void SetPlayerViewActive(bool active)
+    {
+        playerView.enabled = active;
+        if (playerView.TryGetComponent(out Camera camera))
+            camera.enabled = active;
+        if (playerView.TryGetComponent(out AudioListener listener))
+            listener.enabled = active;
     }
 
     private bool TryGetExitPosition(float side, out Vector3 position)
