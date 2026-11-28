@@ -51,6 +51,7 @@ public class CarController : MonoBehaviour
     public float EngineRpm { get; private set; } = IdleRpm;
     public float EngineLoad => CanDrive ? poweredThrottle * (1f - shiftTime / ShiftDuration) : 0f;
     public bool IsDriving => driving;
+    public float DriftIntensity => driftAmount;
     public int GearNumber => currentGear + 1;
     public bool ManualGears { get; private set; }
     public float SpeedKph => carRigidbody != null ? carRigidbody.velocity.magnitude * 3.6f : 0f;
@@ -73,12 +74,14 @@ public class CarController : MonoBehaviour
     private float activeFinalDrive;
     private float activeShiftRpm;
     private Wheel[] wheels;
+    private TireMarks tireMarks;
 
     private void Awake()
     {
         if (carRigidbody == null)
             carRigidbody = GetComponent<Rigidbody>();
 
+        tireMarks = new TireMarks(gameObject.scene);
         carRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
         carRigidbody.centerOfMass = new Vector3(0f, centerOfMass, 0f);
         frontLeftWheelCollider.ConfigureVehicleSubsteps(8f, 8, 4);
@@ -189,7 +192,11 @@ public class CarController : MonoBehaviour
         if (input.Gas > 0f && carRigidbody.IsSleeping())
             carRigidbody.WakeUp();
         handbrake = input.Handbrake;
-        throttle = Mathf.MoveTowards(throttle, input.Gas, step * (input.Gas > throttle ? 4.5f : 10f));
+        // Ease in the binary keyboard pedal at low speed. RT keeps its full analog range.
+        bool assistedStart = input.KeyboardGas && input.Brake < 0.15f;
+        float gas = assistedStart ? Mathf.Lerp(0.5f, 1f, Mathf.InverseLerp(1f, 11f, speed)) : input.Gas;
+        float pedalRate = gas > throttle ? (assistedStart ? 1.8f : 4.5f) : 10f;
+        throttle = Mathf.MoveTowards(throttle, gas, step * pedalRate);
         brake = Mathf.MoveTowards(brake, input.Brake, step * 9f);
 
         Vector3 velocity = carRigidbody.velocity;
@@ -205,7 +212,7 @@ public class CarController : MonoBehaviour
         float burnout = rearDriveOnGround
             ? Mathf.InverseLerp(0.15f, 0.65f, brake) * Mathf.InverseLerp(0.45f, 0.85f, throttle)
                 * (1f - Mathf.InverseLerp(4f, 8f, speed)) : 0f;
-        float launchBurnout = rearDriveOnGround && currentGear == 0
+        float launchBurnout = rearDriveOnGround && currentGear == 0 && !input.KeyboardGas
             ? Mathf.InverseLerp(0.90f, 0.98f, throttle) * (1f - Mathf.InverseLerp(4f, 10f, speed))
                 * (1f - brake) : 0f;
         float rearSpinAssist = Mathf.Max(burnout, launchBurnout);
@@ -388,6 +395,7 @@ public class CarController : MonoBehaviour
         }
 
         wheel.Smoke.Update(wheel.Contact, slip, step);
+        tireMarks.Update(ref wheel.Mark, wheel.Contact, slip);
         if (wheel.Sound != null)
         {
             wheel.Sound.volume = Mathf.MoveTowards(wheel.Sound.volume, slip, step * 4f);
@@ -405,8 +413,11 @@ public class CarController : MonoBehaviour
         source.Play();
     }
 
+    private void OnDestroy() => tireMarks?.Dispose();
+
     private void LateUpdate()
     {
+        tireMarks.Flush();
         float blend = Mathf.Clamp01((Time.time - Time.fixedTime) / Time.fixedDeltaTime);
         foreach (Wheel wheel in wheels)
             wheel.Render(transform, blend, Time.deltaTime);
@@ -419,6 +430,7 @@ public class CarController : MonoBehaviour
         public readonly bool IsFront;
         public readonly bool IsDriven;
         public TireSmoke Smoke;
+        public TireMarks.Track Mark;
         public WheelHit Contact;
         public bool Grounded;
 

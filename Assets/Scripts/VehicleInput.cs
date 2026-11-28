@@ -5,6 +5,7 @@ using UnityEngine.InputSystem.Controls;
 internal struct VehicleInput
 {
     public float Gas;
+    public bool KeyboardGas;
     public float Brake;
     public float Steer;
     public bool Handbrake;
@@ -117,8 +118,11 @@ internal struct VehicleInput
             input.ReadLegacyShifters();
         }
 
-        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))
+        if (input.Gas <= TriggerDeadzone && (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)))
+        {
+            input.KeyboardGas = true;
             input.Gas = 1f;
+        }
         if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))
             input.Brake = 1f;
         if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))

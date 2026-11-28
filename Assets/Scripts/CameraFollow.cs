@@ -10,7 +10,7 @@ public class CameraFollow : MonoBehaviour
     [Header("Дистанция")]
     [SerializeField] private float pivotHeight = 1.38f;
     [SerializeField, Range(0f, 0.4f)] private float brakingPullIn = 0.16f;
-    [SerializeField, Min(0f)] private float maxSpeedPullback = 0.064f;
+    [SerializeField, Min(0f)] private float maxSpeedPullback = 0.032f;
     [SerializeField, Min(0f)] private float speedLift = 0.32f;
     [SerializeField, Min(0f)] private float brakingDrop = 0.28f;
     [SerializeField] private float maxSpeedKphForEffects = 140f;
@@ -29,11 +29,12 @@ public class CameraFollow : MonoBehaviour
     [SerializeField] private float autoReturnSpeed = 3.5f;
 
     [Header("Динамический FOV")]
-    [SerializeField, Range(0f, 40f)] private float speedFovIncrease = 8.8f;
+    [SerializeField, Range(0f, 40f)] private float speedFovIncrease = 4.4f;
     [SerializeField] private float fovLerpSpeed = 5f;
 
     private readonly RaycastHit[] hits = new RaycastHit[16];
     private Camera cam;
+    private RightStickCalibration stickCalibration;
     private AudioListener listener;
     private CarController car;
     private Vector3 startLocalPosition;
@@ -60,6 +61,7 @@ public class CameraFollow : MonoBehaviour
     private void Awake()
     {
         cam = GetComponent<Camera>();
+        stickCalibration = new RightStickCalibration();
         listener = GetComponent<AudioListener>();
         if (target == null)
             return;
@@ -141,7 +143,7 @@ public class CameraFollow : MonoBehaviour
                     mouseLook = new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y")) * legacyMouseSensitivity;
             }
 
-            Vector2 stick = VehicleInput.LookStick;
+            Vector2 stick = stickCalibration.Read();
             Vector2 look = mouseLook + stick * (stickDegreesPerSecond * delta);
 
             if (stick.sqrMagnitude > 0f || mouseLook.sqrMagnitude > 0.0001f)
@@ -173,10 +175,19 @@ public class CameraFollow : MonoBehaviour
         UpdateView(delta, false);
     }
 
+    private void OnGUI()
+    {
+        if (!viewActive || string.IsNullOrEmpty(stickCalibration.Prompt))
+            return;
+        GUI.Box(new Rect(16f, 16f, 440f, 32f), stickCalibration.Prompt);
+    }
+
     private void UpdateView(float delta, bool snap)
     {
         float pivotBlend = snap ? 1f : 1f - Mathf.Exp(-pivotFollowSpeed * delta);
-        float headingBlend = snap ? 1f : 1f - Mathf.Exp(-headingFollowSpeed * delta);
+        float drift = car != null ? car.DriftIntensity : 0f;
+        float headingSpeed = headingFollowSpeed * Mathf.Lerp(1f, 0.38f, drift);
+        float headingBlend = snap ? 1f : 1f - Mathf.Exp(-headingSpeed * delta);
         float distBlend = snap ? 1f : 1f - Mathf.Exp(-distanceFollowSpeed * delta);
 
         float braking = car != null ? car.Braking : 0f;
@@ -195,7 +206,8 @@ public class CameraFollow : MonoBehaviour
         heightOffset = snap ? 0f : Mathf.Lerp(heightOffset, targetHeight, distBlend);
 
         // Легкий крен в поворотах
-        float targetRoll = Mathf.Clamp(-turnRate * 3.2f, -maxRoll, maxRoll);
+        float rollLimit = maxRoll * Mathf.Lerp(1f, 2.15f, drift);
+        float targetRoll = Mathf.Clamp(-turnRate * Mathf.Lerp(3.2f, 8.5f, drift), -rollLimit, rollLimit);
         roll = snap ? 0f : Mathf.Lerp(roll, targetRoll, distBlend);
 
         // Динамический FOV

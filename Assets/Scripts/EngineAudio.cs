@@ -21,6 +21,8 @@ public sealed class EngineAudio : MonoBehaviour
     [SerializeField, Range(0.5f, 5f)] private float distortionDrive = 1.6f;
     [SerializeField, Range(0f, 1f)] private float supercharger = 0.16f;
 
+    [SerializeField, Range(0f, 1f)] private float exhaustResonance = 0.65f;
+
     private CarController car;
     private AudioSource source;
     private AudioClip carrier;
@@ -42,7 +44,8 @@ public sealed class EngineAudio : MonoBehaviour
             rpmPitchRiseSemitones,
             distortionDrive,
             supercharger,
-            firingsPerRevolution);
+            firingsPerRevolution,
+            exhaustResonance);
 
         // A silent non-streaming carrier keeps a spatial AudioSource on the DSP graph.
         // The filter replaces its samples immediately before playback.

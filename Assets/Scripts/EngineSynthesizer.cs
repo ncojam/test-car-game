@@ -20,6 +20,12 @@ internal sealed class EngineSynthesizer
     private readonly float gainBlend;
     private readonly float blowerMix;
     private readonly float drive;
+    private readonly float resonanceMix;
+    private readonly float resonanceRpm;
+    private BandPass bodyBand;
+    private BandPass mudBand;
+    private BandPass presenceBand;
+    private BandPass exhaustBand;
 
     private readonly float[] sampleData;
     private readonly float sampleRateRatio;
@@ -51,7 +57,8 @@ internal sealed class EngineSynthesizer
         float rpmPitchShift,
         float distortionDrive,
         float supercharger,
-        float firingsPerRevolution)
+        float firingsPerRevolution,
+        float exhaustResonance = 0.65f)
     {
         outputRate = outputSampleRate;
         limiterRpm = redlineRpm - 35f;
@@ -61,6 +68,12 @@ internal sealed class EngineSynthesizer
         drive = Math.Max(0.1f, distortionDrive);
         rpmPitchFactor = rpmPitchShift;
         firingsPerRev = Math.Max(0.5f, firingsPerRevolution);
+        resonanceMix = Math.Max(0f, Math.Min(1f, exhaustResonance));
+        resonanceRpm = 210f * 60f / firingsPerRev;
+        bodyBand = new BandPass(outputRate, 105f, 0.8f);
+        mudBand = new BandPass(outputRate, 330f, 1.1f);
+        presenceBand = new BandPass(outputRate, 1700f, 0.85f);
+        exhaustBand = new BandPass(outputRate, 210f, 4.5f);
         // Finish each voice before its slot can be reused at the highest firing rate.
         maxVoiceFrames = (int)(MaxVoices * outputRate / (redlineRpm * firingsPerRev / 60f)) - 2;
         fadeOutFrames = Math.Max(1, outputSampleRate * 5 / 1000);
@@ -161,12 +174,49 @@ internal sealed class EngineSynthesizer
             float x = (float)blowerPhase * 2f - 1f;
             float whine = 4f * x * (1f - Math.Abs(x)) * brightness * brightness * smoothedLoad * blowerMix;
 
-            // Мягкий дисторшн (насыщение, как в FL Studio)
-            float driven = (mixed * 0.55f + whine) * drive;
+            // Parallel bands, each with unity gain at its center, give a controllable bell EQ.
+            float body = bodyBand.Process(mixed);
+            float mud = mudBand.Process(mixed);
+            float presence = presenceBand.Process(mixed);
+            float resonance = exhaustBand.Process(mixed);
+            float resonanceWindow = Math.Max(0f, 1f - Math.Abs(smoothedRpm - resonanceRpm) / 900f);
+            float resonantGain = resonanceMix * resonanceWindow * resonanceWindow * smoothedLoad;
+            float shaped = mixed + body * (0.28f - 0.14f * brightness) - mud * 0.3f
+                + presence * (0.08f + 0.48f * brightness * smoothedLoad) + resonance * resonantGain;
+            float driven = (shaped * 0.5f + whine) * drive;
             float saturated = (float)Math.Tanh(driven);
             float value = smoothedGain * saturated;
             for (int channel = 0; channel < channels; channel++)
                 samples[i + channel] = value;
+        }
+    }
+
+    // Constant-peak-gain bandpass from the RBJ Audio EQ Cookbook.
+    private struct BandPass
+    {
+        private readonly float b0;
+        private readonly float a1;
+        private readonly float a2;
+        private float z1;
+        private float z2;
+
+        public BandPass(float sampleRate, float frequency, float q)
+        {
+            double omega = 2d * Math.PI * Math.Min(frequency, sampleRate * 0.45f) / sampleRate;
+            double alpha = Math.Sin(omega) / (2d * q);
+            double inverseA0 = 1d / (1d + alpha);
+            b0 = (float)(alpha * inverseA0);
+            a1 = (float)(-2d * Math.Cos(omega) * inverseA0);
+            a2 = (float)((1d - alpha) * inverseA0);
+            z1 = z2 = 0f;
+        }
+
+        public float Process(float value)
+        {
+            float filtered = b0 * value + z1;
+            z1 = z2 - a1 * filtered;
+            z2 = -b0 * value - a2 * filtered;
+            return filtered;
         }
     }
 
