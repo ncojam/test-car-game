@@ -217,11 +217,7 @@ public class CarController : MonoBehaviour
                 * (1f - brake) : 0f;
         float rearSpinAssist = Mathf.Max(burnout, launchBurnout);
         if (burnout > 0f && (wheels[0].Grounded || wheels[1].Grounded))
-        {
-            // Locked front wheels act as a pivot at low speed. Steering controls the yaw of the burnout.
-            float yawAcceleration = (steering * 1.2f - TurnRate) * 6f * burnout;
-            carRigidbody.AddTorque(transform.up * yawAcceleration, ForceMode.Acceleration);
-        }
+            ApplyBurnoutSteering(burnout, step);
         float drivingThrottle = throttle * (1f - brake);
         poweredThrottle = Mathf.Lerp(drivingThrottle, throttle, burnout);
 
@@ -251,7 +247,9 @@ public class CarController : MonoBehaviour
 
             WheelFrictionCurve sideways = collider.sidewaysFriction;
             float rearSlide = Mathf.Max(driftAmount, handbrake ? 1f : burnout);
-            sideways.stiffness = wheel.IsFront ? 1.46f : Mathf.Lerp(1.65f, 1.04f, rearSlide);
+            float rearGrip = Mathf.Lerp(1.65f, 1.04f, rearSlide);
+            sideways.stiffness = wheel.IsFront ? 1.46f
+                : Mathf.Lerp(rearGrip, 0.52f, burnout * Mathf.Abs(input.Steer));
             collider.sidewaysFriction = sideways;
 
             if (wheel.IsDriven && wheel.Grounded)
@@ -276,6 +274,24 @@ public class CarController : MonoBehaviour
         targetRpm = Mathf.Lerp(targetRpm, RedlineRpm, rearSpinAssist);
         targetRpm = Mathf.Clamp(targetRpm, IdleRpm, RedlineRpm);
         EngineRpm = Mathf.Lerp(EngineRpm, targetRpm, 1f - Mathf.Exp(-step * (shiftTime > 0f ? 14f : 9f)));
+    }
+
+    private void ApplyBurnoutSteering(float burnout, float step)
+    {
+        Wheel left = wheels[0];
+        Wheel right = wheels[1];
+        Vector3 pivot = left.Grounded && right.Grounded ? (left.Contact.point + right.Contact.point) * 0.5f
+            : (left.Grounded ? left.Contact.point : right.Contact.point);
+        Vector3 up = transform.up;
+        Vector3 pivotVelocity = carRigidbody.GetPointVelocity(pivot);
+
+        // Blend towards the requested yaw and keep the front contact as the center of rotation.
+        float response = (1f - Mathf.Exp(-20f * step)) * burnout;
+        float yawDelta = (input.Steer * 1.55f - TurnRate) * response;
+        Vector3 angularChange = up * yawDelta;
+        carRigidbody.angularVelocity += angularChange;
+        carRigidbody.velocity += Vector3.Cross(angularChange, carRigidbody.worldCenterOfMass - pivot)
+            - Vector3.ProjectOnPlane(pivotVelocity, up) * response;
     }
 
     private void UpdateDrift(Vector3 planarVelocity, float step)
