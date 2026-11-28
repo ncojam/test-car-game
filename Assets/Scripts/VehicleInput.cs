@@ -8,6 +8,8 @@ internal struct VehicleInput
     public float Brake;
     public float Steer;
     public bool Handbrake;
+    public int GearStep;
+    public bool ResumeAutomatic;
 
     private const float StickDeadzone = 0.12f;
     private const float TriggerDeadzone = 0.05f;
@@ -75,6 +77,7 @@ internal struct VehicleInput
             input.Brake = ApplyTriggerDeadzone(pad.leftTrigger.ReadValue());
             input.Steer = ApplyStickDeadzone(pad.leftStick.ReadValue()).x;
             input.Handbrake = pad.buttonSouth.isPressed;
+            input.ReadShifters(pad.leftShoulder, pad.rightShoulder);
         }
         else if (LinuxPad is LinuxController linux)
         {
@@ -82,6 +85,9 @@ internal struct VehicleInput
             input.Brake = linux.Brake;
             input.Steer = ApplyStickDeadzone(linux.Move).x;
             input.Handbrake = linux.South.isPressed;
+            input.ReadShifters(linux.LeftShoulder, linux.RightShoulder);
+            if (linux.LeftShoulder == null && linux.RightShoulder == null && HasLegacyPad())
+                input.ReadLegacyShifters();
         }
         else if (HasLegacyPad())
         {
@@ -94,6 +100,7 @@ internal struct VehicleInput
 #endif
             input.Steer = ApplyStickDeadzone(new Vector2(Input.GetAxisRaw("Horizontal"), 0f)).x;
             input.Handbrake = Input.GetKey(KeyCode.JoystickButton0);
+            input.ReadLegacyShifters();
         }
 
         if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))
@@ -107,6 +114,22 @@ internal struct VehicleInput
 
         input.Handbrake |= Input.GetKey(KeyCode.Space);
         return input;
+    }
+
+    private void ReadShifters(ButtonControl left, ButtonControl right)
+    {
+        bool down = left?.wasPressedThisFrame ?? false;
+        bool up = right?.wasPressedThisFrame ?? false;
+        ResumeAutomatic = (up || down) && left?.isPressed == true && right?.isPressed == true;
+        GearStep = (up ? 1 : 0) - (down ? 1 : 0);
+    }
+
+    private void ReadLegacyShifters()
+    {
+        bool down = Input.GetKeyDown(KeyCode.JoystickButton4);
+        bool up = Input.GetKeyDown(KeyCode.JoystickButton5);
+        ResumeAutomatic = (up || down) && Input.GetKey(KeyCode.JoystickButton4) && Input.GetKey(KeyCode.JoystickButton5);
+        GearStep = (up ? 1 : 0) - (down ? 1 : 0);
     }
 
     private static string legacyDevice;
@@ -168,6 +191,8 @@ internal struct VehicleInput
         public ButtonControl West { get; }
         public ButtonControl South { get; }
         public ButtonControl RightStickClick { get; }
+        public ButtonControl LeftShoulder { get; }
+        public ButtonControl RightShoulder { get; }
         public Vector2 Move => leftStick?.ReadValue() ?? new Vector2(leftX.ReadValue(), leftY.ReadValue());
         public Vector2 Look => new Vector2(rightX.ReadValue(), -rightY.ReadValue());
         public float Gas => Pedal(gas.ReadValue(), ref gasSigned);
@@ -198,6 +223,8 @@ internal struct VehicleInput
             West = west;
             South = south;
             RightStickClick = device.TryGetChildControl("ThumbRight") as ButtonControl;
+            LeftShoulder = device.TryGetChildControl("TriggerLeft") as ButtonControl;
+            RightShoulder = device.TryGetChildControl("TriggerRight") as ButtonControl;
             gasSigned = gas.ReadValue() < -0.8f;
             brakeSigned = brake.ReadValue() < -0.8f;
         }

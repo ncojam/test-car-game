@@ -23,25 +23,33 @@ public class CarController : MonoBehaviour
     [Range(0, 2)] public int wd; // 0 = front, 1 = rear, 2 = all-wheel drive.
     public float maxSteeringAngle = 30f;
     public float motorForce = 1200f;
-    [SerializeField] private float serviceBrakeTorque = 2350f;
+    [SerializeField] private float frontBrakeTorque = 4200f;
+    [SerializeField] private float rearHandbrakeTorque = 4400f;
     [SerializeField] private float centerOfMass = 0.57f;
     [SerializeField] private float antiRollStiffness = 2600f;
 
-    public float[] gearRatios = { 3f, 1.9f, 1.25f, 1f, 0.75f, 0.4f };
-    public float[] gearSpeeds = { 0f, 30f, 70f, 110f, 130f, 160f };
-    public int currentGear;
+    [Header("Transmission")]
+    [Tooltip("Use this car's ratios, final drive and shift RPM instead of the built-in arcade setup.")]
+    [SerializeField] private bool useCustomGearing;
+    [SerializeField] private float[] gearRatios = (float[])ArcadeRatios.Clone();
+    [SerializeField, Min(1f)] private float finalDrive = ArcadeFinalDrive;
+    [SerializeField, Range(4500f, 6300f)] private float fullThrottleShiftRpm = ArcadeShiftRpm;
+    private static readonly float[] ArcadeRatios = { 3.6f, 2.35f, 1.65f, 1.23f, 0.95f, 0.75f };
+    private const float ArcadeFinalDrive = 5.2f;
+    private const float ArcadeShiftRpm = 5950f;
+    private const float ShiftDuration = 0.22f;
+    private int currentGear;
     public AudioSource gear_switch;
     public AudioClip gear_up;
     public AudioClip gear_down;
 
-    [SerializeField, Min(1f)] private float finalDrive = 5.2f;
-
     public const float IdleRpm = 900f;
     public const float RedlineRpm = 7000f;
     public float EngineRpm { get; private set; } = IdleRpm;
-    public float EngineLoad => CanDrive ? throttle * (1f - brake) * (1f - shiftTime / 0.3f) : 0f;
+    public float EngineLoad => CanDrive ? poweredThrottle * (1f - shiftTime / ShiftDuration) : 0f;
     public bool IsDriving => driving;
     public int GearNumber => currentGear + 1;
+    public bool ManualGears { get; private set; }
     public float SpeedKph => carRigidbody != null ? carRigidbody.velocity.magnitude * 3.6f : 0f;
     public float Braking => CanDrive ? Mathf.Max(brake, handbrake ? 0.75f : 0f) : 0f;
     public float TurnRate => carRigidbody != null ? Vector3.Dot(carRigidbody.angularVelocity, transform.up) : 0f;
@@ -53,6 +61,14 @@ public class CarController : MonoBehaviour
     private float brake;
     private float steering;
     private float shiftTime;
+    private int pendingShift;
+    private float poweredThrottle;
+    private float driftEntryTime;
+    private float driftAmount;
+    private float drivenWheelRadius;
+    private float[] activeRatios;
+    private float activeFinalDrive;
+    private float activeShiftRpm;
     private Wheel[] wheels;
 
     private void Awake()
@@ -72,14 +88,26 @@ public class CarController : MonoBehaviour
             new Wheel(rearRightWheelCollider, rearRightWheelTransform, rearRightSFX, false, wd != 0),
         };
 
+        activeRatios = useCustomGearing && gearRatios != null && gearRatios.Length > 0 ? gearRatios : ArcadeRatios;
+        activeFinalDrive = useCustomGearing ? Mathf.Max(1f, finalDrive) : ArcadeFinalDrive;
+        activeShiftRpm = useCustomGearing ? Mathf.Clamp(fullThrottleShiftRpm, 4500f, 6300f) : ArcadeShiftRpm;
+
+        float radiusSum = 0f;
+        int drivenWheels = 0;
         foreach (Wheel wheel in wheels)
         {
+            if (wheel.IsDriven)
+            {
+                radiusSum += wheel.Collider.radius;
+                drivenWheels++;
+            }
             ConfigureSuspension(wheel.Collider);
             wheel.Smoke = new TireSmoke(wheel.Collider.transform, tireSmokeMaterial);
             wheel.SamplePose(carRigidbody);
             StartWheelSound(wheel.Sound);
         }
 
+        drivenWheelRadius = Mathf.Max(0.01f, radiusSum / Mathf.Max(1, drivenWheels));
         SetDriving(startDriving);
     }
 
@@ -102,12 +130,26 @@ public class CarController : MonoBehaviour
     private void Update()
     {
         input = CanDrive ? VehicleInput.Read() : default;
+        if (!CanDrive || input.ResumeAutomatic)
+        {
+            pendingShift = 0;
+            if (input.ResumeAutomatic)
+                ManualGears = false;
+        }
+        else if (input.GearStep != 0)
+        {
+            ManualGears = true;
+            pendingShift = input.GearStep;
+        }
     }
 
     public void SetDriving(bool active)
     {
         input = default;
         driving = active;
+        ManualGears = false;
+        pendingShift = currentGear = 0;
+        shiftTime = driftEntryTime = driftAmount = poweredThrottle = 0f;
         if (active)
             carRigidbody.WakeUp();
         throttle = brake = steering = 0f;
@@ -148,53 +190,73 @@ public class CarController : MonoBehaviour
         brake = Mathf.MoveTowards(brake, input.Brake, step * 9f);
         steering = Mathf.MoveTowards(steering, input.Steer, step * 4f);
 
-        UpdateGear(speed * 3.6f, step);
-        float steerAngle = steering * maxSteeringAngle * Mathf.Lerp(1f, 0.32f, Mathf.InverseLerp(7f, 33f, speed));
+        Vector3 velocity = carRigidbody.velocity;
+        Vector3 planarVelocity = Vector3.ProjectOnPlane(velocity, transform.up);
+        float roadWheelRpm = planarVelocity.magnitude * 60f / (2f * Mathf.PI * drivenWheelRadius);
+        UpdateDrift(planarVelocity, step);
+        UpdateGear(roadWheelRpm, step);
+
+        // With both pedals down at low speed, the front brakes hold the car while the rear axle can spin.
+        float burnout = handbrake || wd == 0 ? 0f
+            : Mathf.InverseLerp(0.15f, 0.65f, brake) * Mathf.InverseLerp(0.45f, 0.85f, throttle)
+                * (1f - Mathf.InverseLerp(4f, 8f, speed));
+        float drivingThrottle = throttle * (1f - brake);
+        poweredThrottle = Mathf.Lerp(drivingThrottle, throttle, burnout);
+
+        float highSpeedSteering = Mathf.Lerp(0.32f, 0.55f, driftAmount);
+        float steerAngle = steering * maxSteeringAngle * Mathf.Lerp(1f, highSpeedSteering, Mathf.InverseLerp(7f, 33f, speed));
         float launch = Mathf.InverseLerp(0.88f, 1f, throttle) * (1f - Mathf.InverseLerp(4f, 16f, speed))
             * (1f - brake);
-        float ratio = currentGear >= 0 && currentGear < gearRatios.Length ? gearRatios[currentGear] : 1f;
-        float torque = motorForce * ratio * throttle * (1f - brake)
-            * Mathf.Lerp(0.62f, 1.06f, launch) * Mathf.Lerp(1f, 0.65f, shiftTime / 0.3f);
+        float ratio = Ratio(currentGear);
+        float torquePerThrottle = motorForce * ratio * Mathf.Lerp(0.62f, 1.06f, Mathf.Max(launch, burnout))
+            * Mathf.Lerp(1f, 0.65f, shiftTime / ShiftDuration) * Mathf.Lerp(1f, 1.28f, driftAmount);
 
         float wheelRpmSum = 0f;
-        float radiusSum = 0f;
-        int drivenWheels = 0;
+        int groundedDrivenWheels = 0;
         foreach (Wheel wheel in wheels)
         {
             WheelCollider collider = wheel.Collider;
             collider.steerAngle = wheel.IsFront ? steerAngle : 0f;
-            collider.motorTorque = wheel.IsDriven && (!handbrake || wheel.IsFront) ? torque : 0f;
-            collider.brakeTorque = wheel.IsFront ? serviceBrakeTorque * brake
-                : Mathf.Max(serviceBrakeTorque * 0.65f * brake, handbrake ? 3300f : 0f);
+            float wheelThrottle = wheel.IsFront ? drivingThrottle : (handbrake ? 0f : poweredThrottle);
+            collider.motorTorque = wheel.IsDriven ? torquePerThrottle * wheelThrottle : 0f;
+            collider.brakeTorque = wheel.IsFront ? frontBrakeTorque * brake : (handbrake ? rearHandbrakeTorque : 0f);
 
-            // Dry asphalt is the baseline. Full-throttle launches relax longitudinal grip on the driven axle.
             WheelFrictionCurve forward = collider.forwardFriction;
-            forward.stiffness = wheel.IsDriven ? Mathf.Lerp(1.32f, 0.78f, launch) : 1.32f;
+            float spinAssist = wheel.IsFront ? launch : Mathf.Max(launch, burnout);
+            forward.stiffness = wheel.IsDriven ? Mathf.Lerp(1.32f, 0.78f, spinAssist) : 1.32f;
             collider.forwardFriction = forward;
 
             WheelFrictionCurve sideways = collider.sidewaysFriction;
-            sideways.stiffness = !wheel.IsFront && handbrake ? 1.04f : (wheel.IsFront ? 1.46f : 1.65f);
+            sideways.stiffness = wheel.IsFront ? 1.46f : Mathf.Lerp(1.65f, 1.04f, Mathf.Max(driftAmount, handbrake ? 1f : 0f));
             collider.sidewaysFriction = sideways;
 
-            if (wheel.IsDriven)
+            if (wheel.IsDriven && wheel.Grounded)
             {
                 wheelRpmSum += Mathf.Abs(collider.rpm);
-                radiusSum += collider.radius;
-                drivenWheels++;
+                groundedDrivenWheels++;
             }
         }
 
-        if (drivenWheels > 0)
-        {
-            float radius = Mathf.Max(0.01f, radiusSum / drivenWheels);
-            float forwardSpeed = Mathf.Abs(Vector3.Dot(carRigidbody.velocity, transform.forward));
-            float roadWheelRpm = forwardSpeed * 60f / (2f * Mathf.PI * radius);
-            float spinRpm = Mathf.Max(0f, wheelRpmSum / drivenWheels - roadWheelRpm);
-            float coupledRpm = (roadWheelRpm + spinRpm * 0.62f) * ratio * finalDrive;
-            float launchFlare = throttle * 1350f * (1f - Mathf.InverseLerp(0.4f, 4.8f, forwardSpeed));
-            float targetRpm = Mathf.Clamp(Mathf.Max(IdleRpm + launchFlare, coupledRpm), IdleRpm, RedlineRpm);
-            EngineRpm = Mathf.Lerp(EngineRpm, targetRpm, 1f - Mathf.Exp(-step * (shiftTime > 0f ? 14f : 9f)));
-        }
+        float spinRpm = groundedDrivenWheels > 0 ? Mathf.Max(0f, wheelRpmSum / groundedDrivenWheels - roadWheelRpm) : 0f;
+        float spinLimit = Mathf.Lerp(420f, RedlineRpm, burnout);
+        float coupledRpm = roadWheelRpm * ratio * activeFinalDrive
+            + Mathf.Min(spinLimit, spinRpm * 0.62f * ratio * activeFinalDrive) * poweredThrottle;
+        float launchFlare = poweredThrottle * 1350f * (1f - Mathf.InverseLerp(0.4f, 4.8f, speed));
+        float targetRpm = Mathf.Clamp(Mathf.Max(IdleRpm + launchFlare, coupledRpm), IdleRpm, RedlineRpm);
+        EngineRpm = Mathf.Lerp(EngineRpm, targetRpm, 1f - Mathf.Exp(-step * (shiftTime > 0f ? 14f : 9f)));
+    }
+
+    private void UpdateDrift(Vector3 planarVelocity, float step)
+    {
+        float speed = planarVelocity.magnitude;
+        bool axlesGrounded = (wheels[0].Grounded || wheels[1].Grounded)
+            && (wheels[2].Grounded || wheels[3].Grounded);
+        float lateralFraction = Mathf.Abs(Vector3.Dot(planarVelocity, transform.right)) / Mathf.Max(1f, speed);
+        bool entry = handbrake && axlesGrounded && speed > 5.5f && Mathf.Abs(steering) > 0.18f;
+        driftEntryTime = entry ? 0.4f : Mathf.Max(0f, driftEntryTime - step);
+        bool sustain = axlesGrounded && speed > 4f && lateralFraction > 0.15f
+            && (driftEntryTime > 0f || driftAmount > 0.1f) && throttle > 0.12f && brake < 0.1f;
+        driftAmount = Mathf.MoveTowards(driftAmount, sustain ? 1f : 0f, step * (sustain ? 6f : 4f));
     }
 
     private void Park()
@@ -206,6 +268,7 @@ public class CarController : MonoBehaviour
             wheel.Collider.steerAngle = 0f;
         }
         EngineRpm = IdleRpm;
+        poweredThrottle = driftAmount = driftEntryTime = 0f;
     }
 
     private void ApplyAntiRoll(Wheel left, Wheel right)
@@ -217,26 +280,41 @@ public class CarController : MonoBehaviour
             carRigidbody.AddForceAtPosition(right.Collider.transform.up * lift, right.Collider.transform.position);
     }
 
-    private void UpdateGear(float speedKph, float step)
+    private float Ratio(int gear) => Mathf.Max(0.1f, activeRatios[gear]);
+
+    private void UpdateGear(float roadWheelRpm, float step)
     {
         shiftTime = Mathf.Max(0f, shiftTime - step);
-        int topGear = Mathf.Max(0, Mathf.Min(gearRatios.Length, gearSpeeds.Length) - 1);
-        currentGear = Mathf.Clamp(currentGear, 0, topGear);
         if (shiftTime > 0f)
             return;
 
+        int topGear = activeRatios.Length - 1;
         int next = currentGear;
-        if (currentGear < topGear && speedKph > gearSpeeds[currentGear + 1])
-            next++;
-        else if (currentGear > 0 && speedKph < gearSpeeds[currentGear] - 6f)
-            next--;
+        float shaftRpm = roadWheelRpm * activeFinalDrive;
+        if (ManualGears)
+        {
+            next = Mathf.Clamp(currentGear + pendingShift, 0, topGear);
+            pendingShift = 0;
+            if (next < currentGear && shaftRpm * Ratio(next) >= RedlineRpm - 200f)
+                return;
+        }
+        else
+        {
+            // Use chassis speed for the shift decision. Burnouts and locked wheels do not fool the gearbox.
+            float upshiftRpm = Mathf.Lerp(activeShiftRpm - 1300f, activeShiftRpm, throttle);
+            float roadRpm = shaftRpm * Ratio(currentGear);
+            if (currentGear < topGear && !handbrake && roadRpm >= upshiftRpm)
+                next++;
+            else if (currentGear > 0 && roadRpm < 3400f && shaftRpm * Ratio(currentGear - 1) < upshiftRpm - 850f)
+                next--;
+        }
 
         if (next == currentGear)
             return;
 
         AudioClip clip = next > currentGear ? gear_up : gear_down;
         currentGear = next;
-        shiftTime = 0.3f;
+        shiftTime = ShiftDuration;
         if (gear_switch != null && clip != null)
             gear_switch.PlayOneShot(clip);
     }

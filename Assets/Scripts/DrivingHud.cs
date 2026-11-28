@@ -18,6 +18,8 @@ public sealed class DrivingHud : MonoBehaviour
     private Font font;
     private Text speed;
     private Text gear;
+    private Text gearMode;
+    private bool shownManual;
     private Text rpm;
     private int shownSpeed = -1;
     private int shownGear = -1;
@@ -47,7 +49,8 @@ public sealed class DrivingHud : MonoBehaviour
 
         speed = Caption("Speed", panel, 84, 33, 192, 60, 51, MainText, FontStyle.Bold, TextAnchor.MiddleRight);
         Caption("Speed unit", panel, 51, 33, 215, 43, 15, Label).text = "KM/H";
-        Caption("Gear label", panel, 58, 37, 302, 66, 14, Label, alignment: TextAnchor.MiddleCenter).text = "GEAR";
+        gearMode = Caption("Gear mode", panel, 86, 37, 302, 66, 14, Label, alignment: TextAnchor.MiddleCenter);
+        gearMode.text = "AUTO";
         gear = Caption("Gear", panel, 60, 30, 305, 47, 41, Accent, FontStyle.Bold, TextAnchor.MiddleCenter);
         Caption("RPM label", panel, 27, 102, 79, 23, 13, Label).text = "RPM";
         rpm = Caption("Engine RPM", panel, 334, 101, 93, 25, 16, MainText, FontStyle.Bold, TextAnchor.MiddleRight);
@@ -81,6 +84,12 @@ public sealed class DrivingHud : MonoBehaviour
         {
             gear.text = gearNumber.ToString();
             shownGear = gearNumber;
+        }
+
+        if (shownManual != car.ManualGears)
+        {
+            shownManual = car.ManualGears;
+            gearMode.text = shownManual ? "MANUAL" : "AUTO";
         }
 
         int rpmRounded = Mathf.RoundToInt(car.EngineRpm / 10f) * 10;
