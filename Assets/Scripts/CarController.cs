@@ -40,7 +40,7 @@ public class CarController : MonoBehaviour
     private const float ShiftDuration = 0.22f;
     private const float DriftUpshiftRpm = 6400f;
     private const float DriftDownshiftRpm = 4500f;
-    private const float DriftEntryWindow = 0.55f;
+    private const float DriftEntryWindow = 0.75f;
     private int currentGear;
     public AudioSource gear_switch;
     public AudioClip gear_up;
@@ -196,8 +196,8 @@ public class CarController : MonoBehaviour
         Vector3 planarVelocity = Vector3.ProjectOnPlane(velocity, transform.up);
         float roadWheelRpm = planarVelocity.magnitude * 60f / (2f * Mathf.PI * drivenWheelRadius);
         UpdateDrift(planarVelocity, step);
-        float steeringAssist = Mathf.Max(driftAmount, 0.65f * driftEntryTime / DriftEntryWindow);
-        steering = Mathf.MoveTowards(steering, input.Steer, step * Mathf.Lerp(4f, 10f, steeringAssist));
+        float steeringAssist = Mathf.Max(driftAmount, 0.85f * driftEntryTime / DriftEntryWindow);
+        steering = Mathf.MoveTowards(steering, input.Steer, step * Mathf.Lerp(4f, 15f, steeringAssist));
         UpdateGear(roadWheelRpm, step);
 
         // With both pedals down at low speed, the front brakes hold the car while the rear axle can spin.
@@ -218,13 +218,13 @@ public class CarController : MonoBehaviour
         float drivingThrottle = throttle * (1f - brake);
         poweredThrottle = Mathf.Lerp(drivingThrottle, throttle, burnout);
 
-        float highSpeedSteering = Mathf.Lerp(0.32f, 0.78f, steeringAssist);
+        float highSpeedSteering = Mathf.Lerp(0.32f, 1f, steeringAssist);
         float steerAngle = steering * maxSteeringAngle * Mathf.Lerp(1f, highSpeedSteering, Mathf.InverseLerp(7f, 33f, speed));
         float launch = Mathf.InverseLerp(0.88f, 1f, throttle) * (1f - Mathf.InverseLerp(4f, 16f, speed))
             * (1f - brake);
         float ratio = Ratio(currentGear);
         float torquePerThrottle = motorForce * ratio * Mathf.Lerp(0.62f, 1.06f, Mathf.Max(launch, rearSpinAssist))
-            * Mathf.Lerp(1f, 0.65f, shiftTime / ShiftDuration) * Mathf.Lerp(1f, 1.28f, driftAmount);
+            * Mathf.Lerp(1f, 0.65f, shiftTime / ShiftDuration) * Mathf.Lerp(1f, 1.42f, driftAmount);
 
         float wheelRpmSum = 0f;
         int groundedDrivenWheels = 0;
@@ -277,7 +277,11 @@ public class CarController : MonoBehaviour
         bool axlesGrounded = (wheels[0].Grounded || wheels[1].Grounded)
             && (wheels[2].Grounded || wheels[3].Grounded);
         float lateralFraction = Mathf.Abs(Vector3.Dot(planarVelocity, transform.right)) / Mathf.Max(1f, speed);
-        bool entry = handbrake && axlesGrounded && speed > 5.5f && Mathf.Abs(input.Steer) > 0.18f;
+        bool turning = speed > 5f && Mathf.Abs(input.Steer) > 0.18f;
+        bool rearSliding = (wheels[2].Grounded && Mathf.Abs(wheels[2].Contact.sidewaysSlip) > 0.4f)
+            || (wheels[3].Grounded && Mathf.Abs(wheels[3].Contact.sidewaysSlip) > 0.4f);
+        bool powerOversteer = wd != 0 && throttle > 0.65f && lateralFraction > 0.14f && rearSliding;
+        bool entry = axlesGrounded && turning && (handbrake || powerOversteer);
         driftEntryTime = entry ? DriftEntryWindow : Mathf.Max(0f, driftEntryTime - step);
         bool driftActive = axlesGrounded && (driftEntryTime > 0f || driftAmount > 0.1f);
         float target = driftActive
@@ -286,6 +290,16 @@ public class CarController : MonoBehaviour
                 * (1f - Mathf.InverseLerp(0.07f, 0.2f, brake)) : 0f;
         float blend = 1f - Mathf.Exp(-step * (target > driftAmount ? 12f : 3.5f));
         driftAmount = Mathf.Lerp(driftAmount, target, blend);
+
+        if (axlesGrounded && driftAmount > 0.01f && !handbrake)
+        {
+            // The stick guides rotation. At larger slip angles, help the nose follow the slide.
+            float slipAngle = Vector3.SignedAngle(transform.forward, planarVelocity, transform.up);
+            float spinCorrection = Mathf.Sign(slipAngle) * Mathf.InverseLerp(28f, 53f, Mathf.Abs(slipAngle));
+            float targetYawRate = steering * 1.35f + spinCorrection * 1.6f;
+            float yawAcceleration = Mathf.Clamp((targetYawRate - TurnRate) * 4.5f, -6f, 6f) * driftAmount;
+            carRigidbody.AddTorque(transform.up * yawAcceleration, ForceMode.Acceleration);
+        }
     }
 
     private void Park()

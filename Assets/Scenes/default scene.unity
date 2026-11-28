@@ -12396,7 +12396,7 @@ MonoBehaviour:
   target: {fileID: 293419003}
   pivotHeight: 1.38
   brakingPullIn: 0.16
-  maxSpeedPullback: 0.16
+  maxSpeedPullback: 0.064
   speedLift: 0.32
   brakingDrop: 0.28
   maxSpeedKphForEffects: 140
@@ -12409,7 +12409,7 @@ MonoBehaviour:
   stickDegreesPerSecond: 145
   autoReturnDelay: 1.4
   autoReturnSpeed: 3.5
-  speedFovIncrease: 22
+  speedFovIncrease: 8.8
   fovLerpSpeed: 5
 --- !u!1 &3000000017
 GameObject:

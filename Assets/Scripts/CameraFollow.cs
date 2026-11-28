@@ -10,7 +10,7 @@ public class CameraFollow : MonoBehaviour
     [Header("Дистанция")]
     [SerializeField] private float pivotHeight = 1.38f;
     [SerializeField, Range(0f, 0.4f)] private float brakingPullIn = 0.16f;
-    [SerializeField, Min(0f)] private float maxSpeedPullback = 0.16f;
+    [SerializeField, Min(0f)] private float maxSpeedPullback = 0.064f;
     [SerializeField, Min(0f)] private float speedLift = 0.32f;
     [SerializeField, Min(0f)] private float brakingDrop = 0.28f;
     [SerializeField] private float maxSpeedKphForEffects = 140f;
@@ -29,7 +29,7 @@ public class CameraFollow : MonoBehaviour
     [SerializeField] private float autoReturnSpeed = 3.5f;
 
     [Header("Динамический FOV")]
-    [SerializeField, Range(0f, 40f)] private float speedFovIncrease = 22f;
+    [SerializeField, Range(0f, 40f)] private float speedFovIncrease = 8.8f;
     [SerializeField] private float fovLerpSpeed = 5f;
 
     private readonly RaycastHit[] hits = new RaycastHit[16];
