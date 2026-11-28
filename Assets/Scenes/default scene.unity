@@ -1047,9 +1047,11 @@ MonoBehaviour:
   wd: 1
   maxSteeringAngle: 30
   motorForce: 1200
-  serviceBrakeTorque: 2350
+  frontBrakeTorque: 4200
+  rearHandbrakeTorque: 4400
   centerOfMass: 0.57
   antiRollStiffness: 2600
+  useCustomGearing: 0
   gearRatios:
   - 3
   - 1.9
@@ -1057,19 +1059,11 @@ MonoBehaviour:
   - 1
   - 0.75
   - 0.4
-  gearSpeeds:
-  - 0
-  - 30
-  - 70
-  - 110
-  - 130
-  - 160
-  - 9999
-  currentGear: 0
+  finalDrive: 5.2
+  fullThrottleShiftRpm: 5950
   gear_switch: {fileID: 898143939}
   gear_up: {fileID: 8300000, guid: 697391839949c814295992defbbe5d56, type: 3}
   gear_down: {fileID: 8300000, guid: ba65a2db34fd284469bf4ba5ccd39e9d, type: 3}
-  finalDrive: 5.2
 --- !u!65 &293419001
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -12387,6 +12381,36 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &3000000016
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3000000017}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e02c8a091a344374293dfdf8b703ad2b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  target: {fileID: 293419003}
+  pivotHeight: 1.38
+  brakingPullIn: 0.16
+  maxSpeedPullback: 0.16
+  speedLift: 0.32
+  brakingDrop: 0.28
+  maxSpeedKphForEffects: 140
+  pivotFollowSpeed: 24
+  headingFollowSpeed: 4.2
+  distanceFollowSpeed: 6
+  maxRoll: 5.5
+  mouseSensitivity: 0.19
+  legacyMouseSensitivity: 2.5
+  stickDegreesPerSecond: 145
+  autoReturnDelay: 1.4
+  autoReturnSpeed: 3.5
+  speedFovIncrease: 22
+  fovLerpSpeed: 5
 --- !u!1 &3000000017
 GameObject:
   m_ObjectHideFlags: 0
@@ -12414,8 +12438,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 3000000017}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.10452846, y: 0, z: 0, w: 0.99452190}
-  m_LocalPosition: {x: 0, y: 2.502723, z: -5.281997}
+  m_LocalRotation: {x: 0.10452846, y: 0, z: 0, w: 0.9945219}
+  m_LocalPosition: {x: 0, y: 1.7, z: -3.56}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -12454,7 +12478,7 @@ Camera:
     height: 1
   near clip plane: 0.1
   far clip plane: 400
-  field of view: 60
+  field of view: 75
   orthographic: 0
   orthographic size: 5
   m_Depth: -1
@@ -12480,34 +12504,6 @@ AudioListener:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 3000000017}
   m_Enabled: 0
---- !u!114 &3000000016
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3000000017}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e02c8a091a344374293dfdf8b703ad2b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  target: {fileID: 293419003}
-  pivotHeight: 1.38
-  brakingPullIn: 0.16
-  maxSpeedPullback: 0.16
-  maxSpeedKphForEffects: 140
-  pivotFollowSpeed: 24
-  headingFollowSpeed: 4.2
-  distanceFollowSpeed: 6
-  maxRoll: 5.5
-  mouseSensitivity: 0.19
-  legacyMouseSensitivity: 2.5
-  stickDegreesPerSecond: 145
-  autoReturnDelay: 1.4
-  autoReturnSpeed: 3.5
-  speedFovIncrease: 22
-  fovLerpSpeed: 5
 --- !u!114 &3000000100
 MonoBehaviour:
   m_ObjectHideFlags: 0
