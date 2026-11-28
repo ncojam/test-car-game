@@ -40,6 +40,7 @@ public class CarController : MonoBehaviour
     private const float ShiftDuration = 0.22f;
     private const float DriftUpshiftRpm = 6400f;
     private const float DriftDownshiftRpm = 4500f;
+    private const float DriftEntryWindow = 0.55f;
     private int currentGear;
     public AudioSource gear_switch;
     public AudioClip gear_up;
@@ -195,14 +196,25 @@ public class CarController : MonoBehaviour
         Vector3 planarVelocity = Vector3.ProjectOnPlane(velocity, transform.up);
         float roadWheelRpm = planarVelocity.magnitude * 60f / (2f * Mathf.PI * drivenWheelRadius);
         UpdateDrift(planarVelocity, step);
-        float steeringAssist = Mathf.Max(driftAmount, handbrake && driftEntryTime > 0f ? 0.65f : 0f);
+        float steeringAssist = Mathf.Max(driftAmount, 0.65f * driftEntryTime / DriftEntryWindow);
         steering = Mathf.MoveTowards(steering, input.Steer, step * Mathf.Lerp(4f, 10f, steeringAssist));
         UpdateGear(roadWheelRpm, step);
 
         // With both pedals down at low speed, the front brakes hold the car while the rear axle can spin.
-        float burnout = handbrake || wd == 0 ? 0f
-            : Mathf.InverseLerp(0.15f, 0.65f, brake) * Mathf.InverseLerp(0.45f, 0.85f, throttle)
-                * (1f - Mathf.InverseLerp(4f, 8f, speed));
+        bool rearDriveOnGround = wd != 0 && !handbrake && (wheels[2].Grounded || wheels[3].Grounded);
+        float burnout = rearDriveOnGround
+            ? Mathf.InverseLerp(0.15f, 0.65f, brake) * Mathf.InverseLerp(0.45f, 0.85f, throttle)
+                * (1f - Mathf.InverseLerp(4f, 8f, speed)) : 0f;
+        float launchBurnout = rearDriveOnGround && currentGear == 0
+            ? Mathf.InverseLerp(0.90f, 0.98f, throttle) * (1f - Mathf.InverseLerp(4f, 10f, speed))
+                * (1f - brake) : 0f;
+        float rearSpinAssist = Mathf.Max(burnout, launchBurnout);
+        if (burnout > 0f && (wheels[0].Grounded || wheels[1].Grounded))
+        {
+            // Locked front wheels act as a pivot at low speed. Steering controls the yaw of the burnout.
+            float yawAcceleration = (steering * 1.2f - TurnRate) * 6f * burnout;
+            carRigidbody.AddTorque(transform.up * yawAcceleration, ForceMode.Acceleration);
+        }
         float drivingThrottle = throttle * (1f - brake);
         poweredThrottle = Mathf.Lerp(drivingThrottle, throttle, burnout);
 
@@ -211,7 +223,7 @@ public class CarController : MonoBehaviour
         float launch = Mathf.InverseLerp(0.88f, 1f, throttle) * (1f - Mathf.InverseLerp(4f, 16f, speed))
             * (1f - brake);
         float ratio = Ratio(currentGear);
-        float torquePerThrottle = motorForce * ratio * Mathf.Lerp(0.62f, 1.06f, Mathf.Max(launch, burnout))
+        float torquePerThrottle = motorForce * ratio * Mathf.Lerp(0.62f, 1.06f, Mathf.Max(launch, rearSpinAssist))
             * Mathf.Lerp(1f, 0.65f, shiftTime / ShiftDuration) * Mathf.Lerp(1f, 1.28f, driftAmount);
 
         float wheelRpmSum = 0f;
@@ -225,12 +237,14 @@ public class CarController : MonoBehaviour
             collider.brakeTorque = wheel.IsFront ? frontBrakeTorque * brake : (handbrake ? rearHandbrakeTorque : 0f);
 
             WheelFrictionCurve forward = collider.forwardFriction;
-            float spinAssist = wheel.IsFront ? launch : Mathf.Max(launch, burnout);
-            forward.stiffness = wheel.IsDriven ? Mathf.Lerp(1.32f, 0.78f, spinAssist) : 1.32f;
+            float launchGrip = wheel.IsFront ? Mathf.Lerp(1.32f, 0.78f, launch)
+                : Mathf.Lerp(Mathf.Lerp(1.32f, 0.78f, launch), 0.48f, rearSpinAssist);
+            forward.stiffness = wheel.IsDriven ? launchGrip : 1.32f;
             collider.forwardFriction = forward;
 
             WheelFrictionCurve sideways = collider.sidewaysFriction;
-            sideways.stiffness = wheel.IsFront ? 1.46f : Mathf.Lerp(1.65f, 1.04f, Mathf.Max(driftAmount, handbrake ? 1f : 0f));
+            float rearSlide = Mathf.Max(driftAmount, handbrake ? 1f : burnout);
+            sideways.stiffness = wheel.IsFront ? 1.46f : Mathf.Lerp(1.65f, 1.04f, rearSlide);
             collider.sidewaysFriction = sideways;
 
             if (wheel.IsDriven && wheel.Grounded)
@@ -241,7 +255,7 @@ public class CarController : MonoBehaviour
         }
 
         float spinRpm = groundedDrivenWheels > 0 ? Mathf.Max(0f, wheelRpmSum / groundedDrivenWheels - roadWheelRpm) : 0f;
-        float spinLimit = Mathf.Lerp(420f, RedlineRpm, burnout);
+        float spinLimit = Mathf.Lerp(420f, RedlineRpm, rearSpinAssist);
         float coupledRpm = roadWheelRpm * ratio * activeFinalDrive
             + Mathf.Min(spinLimit, spinRpm * 0.62f * ratio * activeFinalDrive) * poweredThrottle;
         float launchFlare = poweredThrottle * 1350f * (1f - Mathf.InverseLerp(0.4f, 4.8f, speed));
@@ -251,7 +265,9 @@ public class CarController : MonoBehaviour
         float driftRpm = Mathf.Lerp(4900f, 5700f, poweredThrottle)
             * Mathf.Lerp(1f, 0.8f, shiftTime / ShiftDuration);
         float targetRpm = Mathf.Max(IdleRpm + launchFlare, coupledRpm);
-        targetRpm = Mathf.Clamp(Mathf.Lerp(targetRpm, Mathf.Max(targetRpm, driftRpm), driftClutch), IdleRpm, RedlineRpm);
+        targetRpm = Mathf.Lerp(targetRpm, Mathf.Max(targetRpm, driftRpm), driftClutch);
+        targetRpm = Mathf.Lerp(targetRpm, RedlineRpm, rearSpinAssist);
+        targetRpm = Mathf.Clamp(targetRpm, IdleRpm, RedlineRpm);
         EngineRpm = Mathf.Lerp(EngineRpm, targetRpm, 1f - Mathf.Exp(-step * (shiftTime > 0f ? 14f : 9f)));
     }
 
@@ -262,10 +278,14 @@ public class CarController : MonoBehaviour
             && (wheels[2].Grounded || wheels[3].Grounded);
         float lateralFraction = Mathf.Abs(Vector3.Dot(planarVelocity, transform.right)) / Mathf.Max(1f, speed);
         bool entry = handbrake && axlesGrounded && speed > 5.5f && Mathf.Abs(input.Steer) > 0.18f;
-        driftEntryTime = entry ? 0.55f : Mathf.Max(0f, driftEntryTime - step);
-        bool sustain = axlesGrounded && speed > 4f && lateralFraction > 0.15f
-            && (driftEntryTime > 0f || driftAmount > 0.1f) && throttle > 0.12f && brake < 0.1f;
-        driftAmount = Mathf.MoveTowards(driftAmount, sustain ? 1f : 0f, step * (sustain ? 8f : 4f));
+        driftEntryTime = entry ? DriftEntryWindow : Mathf.Max(0f, driftEntryTime - step);
+        bool driftActive = axlesGrounded && (driftEntryTime > 0f || driftAmount > 0.1f);
+        float target = driftActive
+            ? Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.07f, 0.19f, lateralFraction))
+                * Mathf.InverseLerp(3f, 5f, speed) * Mathf.InverseLerp(0.06f, 0.2f, throttle)
+                * (1f - Mathf.InverseLerp(0.07f, 0.2f, brake)) : 0f;
+        float blend = 1f - Mathf.Exp(-step * (target > driftAmount ? 12f : 3.5f));
+        driftAmount = Mathf.Lerp(driftAmount, target, blend);
     }
 
     private void Park()
@@ -335,8 +355,17 @@ public class CarController : MonoBehaviour
         {
             float forwardSlip = wheel.Contact.forwardSlip;
             float sidewaysSlip = Mathf.Abs(wheel.Contact.sidewaysSlip);
-            float spin = wheel.IsDriven && wheel.Collider.motorTorque > 0f
-                ? Mathf.InverseLerp(0.1f, 0.52f, -forwardSlip) : 0f;
+            float spin = 0f;
+            if (wheel.IsDriven && wheel.Collider.motorTorque > 0f)
+            {
+                // At very low chassis speed, the tread-to-road speed also detects a standing burnout.
+                float treadSpeed = Mathf.Abs(wheel.Collider.rpm) * (2f * Mathf.PI * wheel.Collider.radius / 60f);
+                float contactSpeed = Mathf.Abs(Vector3.Dot(carRigidbody.GetPointVelocity(wheel.Contact.point),
+                    wheel.Contact.forwardDir));
+                float spinSpeed = Mathf.InverseLerp(0.8f, 4f, treadSpeed - contactSpeed)
+                    * (1f - Mathf.InverseLerp(4f, 9f, speed));
+                spin = Mathf.Max(Mathf.InverseLerp(0.1f, 0.52f, -forwardSlip), spinSpeed);
+            }
             float skid = Braking > 0.18f && speed > 1.5f
                 ? Mathf.InverseLerp(0.05f, 0.32f, Mathf.Max(forwardSlip, sidewaysSlip)) : 0f;
             float drift = speed > 2f ? Mathf.InverseLerp(0.22f, 0.8f, sidewaysSlip) : 0f;
