@@ -12494,8 +12494,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   target: {fileID: 293419003}
   pivotHeight: 1.38
-  brakingPullIn: 0.25
-  maxSpeedPullback: 0.35
+  brakingPullIn: 0.16
+  maxSpeedPullback: 0.16
   maxSpeedKphForEffects: 140
   pivotFollowSpeed: 24
   headingFollowSpeed: 4.2

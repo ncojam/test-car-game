@@ -38,9 +38,23 @@ internal struct VehicleInput
         ?? LinuxPad?.Move
         ?? new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical")));
 
-    public static Vector2 LookStick => ApplyStickDeadzone(ActivePad?.rightStick.ReadValue()
-        ?? LinuxPad?.Look
-        ?? (HasLegacyPad() ? new Vector2(Input.GetAxisRaw("StickR X"), -Input.GetAxisRaw("StickR Y")) : Vector2.zero));
+    public static Vector2 LookStick
+    {
+        get
+        {
+            // A recognized pad can still report an unmapped (always zero) right stick.
+            Gamepad pad = ActivePad;
+            Vector2 look = pad != null ? pad.rightStick.ReadValue() : Vector2.zero;
+            if (look.sqrMagnitude > 0f)
+                return look;
+
+            look = ApplyStickDeadzone(LinuxPad?.Look ?? Vector2.zero);
+            if (look.sqrMagnitude > 0f || !HasLegacyPad())
+                return look;
+
+            return ApplyStickDeadzone(new Vector2(Input.GetAxisRaw("StickR X"), -Input.GetAxisRaw("StickR Y")));
+        }
+    }
 
     private static Vector2 ApplyStickDeadzone(Vector2 raw)
     {
@@ -194,13 +208,15 @@ internal struct VehicleInput
         public ButtonControl LeftShoulder { get; }
         public ButtonControl RightShoulder { get; }
         public Vector2 Move => leftStick?.ReadValue() ?? new Vector2(leftX.ReadValue(), leftY.ReadValue());
-        public Vector2 Look => new Vector2(rightX.ReadValue(), -rightY.ReadValue());
+        public Vector2 Look => rightStick?.ReadValue()
+            ?? new Vector2(rightX?.ReadValue() ?? 0f, -(rightY?.ReadValue() ?? 0f));
         public float Gas => Pedal(gas.ReadValue(), ref gasSigned);
         public float Brake => Pedal(brake.ReadValue(), ref brakeSigned);
 
         private readonly StickControl leftStick;
         private readonly AxisControl leftX;
         private readonly AxisControl leftY;
+        private readonly StickControl rightStick;
         private readonly AxisControl rightX;
         private readonly AxisControl rightY;
         private readonly AxisControl gas;
@@ -216,6 +232,7 @@ internal struct VehicleInput
             leftStick = stick;
             leftX = x;
             leftY = y;
+            rightStick = device.TryGetChildControl("rightStick") as StickControl;
             rightX = rx;
             rightY = ry;
             gas = gasAxis;
@@ -246,7 +263,7 @@ internal struct VehicleInput
                 ?? device.TryGetChildControl("Z") as AxisControl;
             var west = device.TryGetChildControl("X") as ButtonControl;
             var south = device.TryGetChildControl("A") as ButtonControl;
-            if ((stick == null && (x == null || y == null)) || rx == null || ry == null
+            if ((stick == null && (x == null || y == null))
                 || gas == null || brake == null || west == null || south == null)
                 return null;
 

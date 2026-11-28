@@ -9,8 +9,10 @@ public class CameraFollow : MonoBehaviour
 
     [Header("Дистанция")]
     [SerializeField] private float pivotHeight = 1.38f;
-    [SerializeField, Range(0f, 0.4f)] private float brakingPullIn = 0.25f;
-    [SerializeField, Min(0f)] private float maxSpeedPullback = 0.35f;
+    [SerializeField, Range(0f, 0.4f)] private float brakingPullIn = 0.16f;
+    [SerializeField, Min(0f)] private float maxSpeedPullback = 0.16f;
+    [SerializeField, Min(0f)] private float speedLift = 0.32f;
+    [SerializeField, Min(0f)] private float brakingDrop = 0.28f;
     [SerializeField] private float maxSpeedKphForEffects = 140f;
 
     [Header("Плавность и повороты")]
@@ -49,6 +51,7 @@ public class CameraFollow : MonoBehaviour
     private float orbitIdleTimer;
     private float currentDistance;
     private float visibleDistance;
+    private float heightOffset;
     private float roll;
     private Vector3 pivot;
     private CursorLockMode previousLock;
@@ -87,6 +90,7 @@ public class CameraFollow : MonoBehaviour
         orbitPitch = 0f;
         orbitIdleTimer = autoReturnDelay;
         currentDistance = visibleDistance = startDistance;
+        heightOffset = 0f;
         roll = 0f;
         pivot = GetPivot();
 
@@ -140,7 +144,7 @@ public class CameraFollow : MonoBehaviour
             Vector2 stick = VehicleInput.LookStick;
             Vector2 look = mouseLook + stick * (stickDegreesPerSecond * delta);
 
-            if (look.sqrMagnitude > 0.0001f)
+            if (stick.sqrMagnitude > 0f || mouseLook.sqrMagnitude > 0.0001f)
             {
                 orbitYaw = Mathf.Repeat(orbitYaw + look.x + 180f, 360f) - 180f;
                 orbitPitch = Mathf.Clamp(startPitch + orbitPitch - look.y,
@@ -158,7 +162,7 @@ public class CameraFollow : MonoBehaviour
                 }
             }
 
-            if (VehicleInput.ResetLookPressed)
+            if (stick.sqrMagnitude == 0f && VehicleInput.ResetLookPressed)
             {
                 orbitYaw = 0f;
                 orbitPitch = 0f;
@@ -187,6 +191,8 @@ public class CameraFollow : MonoBehaviour
         float brakingDistance = startDistance * (1f - brakingPullIn);
         float targetDistance = Mathf.Lerp(startDistance + speedNorm * maxSpeedPullback, brakingDistance, braking);
         currentDistance = snap ? startDistance : Mathf.Lerp(currentDistance, targetDistance, distBlend);
+        float targetHeight = Mathf.Lerp(speedNorm * speedLift, -brakingDrop, braking);
+        heightOffset = snap ? 0f : Mathf.Lerp(heightOffset, targetHeight, distBlend);
 
         // Легкий крен в поворотах
         float targetRoll = Mathf.Clamp(-turnRate * 3.2f, -maxRoll, maxRoll);
@@ -199,19 +205,27 @@ public class CameraFollow : MonoBehaviour
         Quaternion orbit = Quaternion.Euler(0f, heading + orbitYaw, 0f)
             * Quaternion.AngleAxis(orbitPitch, pitchAxis);
         Vector3 direction = orbit * startDirection;
-        float clearance = FindClearance(direction);
+        Vector3 offset = direction * currentDistance + Vector3.up * heightOffset;
+        float offsetDistance = offset.magnitude;
+        Vector3 offsetDirection = offsetDistance > 0.001f ? offset / offsetDistance : direction;
+        float clearance = FindClearance(offsetDirection, offsetDistance);
         visibleDistance = clearance < visibleDistance ? clearance : Mathf.Lerp(visibleDistance, clearance, distBlend);
 
-        Quaternion rotation = orbit * startRotation * Quaternion.AngleAxis(roll, Vector3.forward);
-        transform.SetPositionAndRotation(pivot + direction * visibleDistance, rotation);
+        // Compensate for the camera's lift, then bias the wider view towards the road ahead.
+        float liftPitch = (Mathf.Asin(Mathf.Clamp(offsetDirection.y, -1f, 1f))
+            - Mathf.Asin(Mathf.Clamp(direction.y, -1f, 1f))) * Mathf.Rad2Deg;
+        float framingPitch = (cam.fieldOfView - startFov) * 0.27f;
+        Quaternion rotation = orbit * startRotation * Quaternion.AngleAxis(liftPitch - framingPitch, Vector3.right)
+            * Quaternion.AngleAxis(roll, Vector3.forward);
+        transform.SetPositionAndRotation(pivot + offsetDirection * visibleDistance, rotation);
     }
 
     private Vector3 GetPivot() => target.position + Vector3.up * pivotHeight;
 
-    private float FindClearance(Vector3 direction)
+    private float FindClearance(Vector3 direction, float distance)
     {
-        float clearance = currentDistance;
-        int count = Physics.SphereCastNonAlloc(pivot, 0.2f, direction, hits, currentDistance, ~0, QueryTriggerInteraction.Ignore);
+        float clearance = distance;
+        int count = Physics.SphereCastNonAlloc(pivot, 0.2f, direction, hits, distance, ~0, QueryTriggerInteraction.Ignore);
         for (int i = 0; i < count; i++)
         {
             RaycastHit hit = hits[i];
