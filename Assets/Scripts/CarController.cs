@@ -38,6 +38,8 @@ public class CarController : MonoBehaviour
     private const float ArcadeFinalDrive = 5.2f;
     private const float ArcadeShiftRpm = 5950f;
     private const float ShiftDuration = 0.22f;
+    private const float DriftUpshiftRpm = 6400f;
+    private const float DriftDownshiftRpm = 4500f;
     private int currentGear;
     public AudioSource gear_switch;
     public AudioClip gear_up;
@@ -188,12 +190,13 @@ public class CarController : MonoBehaviour
         handbrake = input.Handbrake;
         throttle = Mathf.MoveTowards(throttle, input.Gas, step * (input.Gas > throttle ? 4.5f : 10f));
         brake = Mathf.MoveTowards(brake, input.Brake, step * 9f);
-        steering = Mathf.MoveTowards(steering, input.Steer, step * 4f);
 
         Vector3 velocity = carRigidbody.velocity;
         Vector3 planarVelocity = Vector3.ProjectOnPlane(velocity, transform.up);
         float roadWheelRpm = planarVelocity.magnitude * 60f / (2f * Mathf.PI * drivenWheelRadius);
         UpdateDrift(planarVelocity, step);
+        float steeringAssist = Mathf.Max(driftAmount, handbrake && driftEntryTime > 0f ? 0.65f : 0f);
+        steering = Mathf.MoveTowards(steering, input.Steer, step * Mathf.Lerp(4f, 10f, steeringAssist));
         UpdateGear(roadWheelRpm, step);
 
         // With both pedals down at low speed, the front brakes hold the car while the rear axle can spin.
@@ -203,7 +206,7 @@ public class CarController : MonoBehaviour
         float drivingThrottle = throttle * (1f - brake);
         poweredThrottle = Mathf.Lerp(drivingThrottle, throttle, burnout);
 
-        float highSpeedSteering = Mathf.Lerp(0.32f, 0.55f, driftAmount);
+        float highSpeedSteering = Mathf.Lerp(0.32f, 0.78f, steeringAssist);
         float steerAngle = steering * maxSteeringAngle * Mathf.Lerp(1f, highSpeedSteering, Mathf.InverseLerp(7f, 33f, speed));
         float launch = Mathf.InverseLerp(0.88f, 1f, throttle) * (1f - Mathf.InverseLerp(4f, 16f, speed))
             * (1f - brake);
@@ -242,7 +245,13 @@ public class CarController : MonoBehaviour
         float coupledRpm = roadWheelRpm * ratio * activeFinalDrive
             + Mathf.Min(spinLimit, spinRpm * 0.62f * ratio * activeFinalDrive) * poweredThrottle;
         float launchFlare = poweredThrottle * 1350f * (1f - Mathf.InverseLerp(0.4f, 4.8f, speed));
-        float targetRpm = Mathf.Clamp(Mathf.Max(IdleRpm + launchFlare, coupledRpm), IdleRpm, RedlineRpm);
+        // Allow clutch slip under power to keep the engine in its useful range during a slide.
+        float driftThrottle = Mathf.InverseLerp(0.12f, 0.5f, poweredThrottle);
+        float driftClutch = driftAmount * driftThrottle * (handbrake ? 0f : 1f);
+        float driftRpm = Mathf.Lerp(4900f, 5700f, poweredThrottle)
+            * Mathf.Lerp(1f, 0.8f, shiftTime / ShiftDuration);
+        float targetRpm = Mathf.Max(IdleRpm + launchFlare, coupledRpm);
+        targetRpm = Mathf.Clamp(Mathf.Lerp(targetRpm, Mathf.Max(targetRpm, driftRpm), driftClutch), IdleRpm, RedlineRpm);
         EngineRpm = Mathf.Lerp(EngineRpm, targetRpm, 1f - Mathf.Exp(-step * (shiftTime > 0f ? 14f : 9f)));
     }
 
@@ -252,11 +261,11 @@ public class CarController : MonoBehaviour
         bool axlesGrounded = (wheels[0].Grounded || wheels[1].Grounded)
             && (wheels[2].Grounded || wheels[3].Grounded);
         float lateralFraction = Mathf.Abs(Vector3.Dot(planarVelocity, transform.right)) / Mathf.Max(1f, speed);
-        bool entry = handbrake && axlesGrounded && speed > 5.5f && Mathf.Abs(steering) > 0.18f;
-        driftEntryTime = entry ? 0.4f : Mathf.Max(0f, driftEntryTime - step);
+        bool entry = handbrake && axlesGrounded && speed > 5.5f && Mathf.Abs(input.Steer) > 0.18f;
+        driftEntryTime = entry ? 0.55f : Mathf.Max(0f, driftEntryTime - step);
         bool sustain = axlesGrounded && speed > 4f && lateralFraction > 0.15f
             && (driftEntryTime > 0f || driftAmount > 0.1f) && throttle > 0.12f && brake < 0.1f;
-        driftAmount = Mathf.MoveTowards(driftAmount, sustain ? 1f : 0f, step * (sustain ? 6f : 4f));
+        driftAmount = Mathf.MoveTowards(driftAmount, sustain ? 1f : 0f, step * (sustain ? 8f : 4f));
     }
 
     private void Park()
@@ -299,11 +308,13 @@ public class CarController : MonoBehaviour
         else
         {
             // Use chassis speed for the shift decision. Burnouts and locked wheels do not fool the gearbox.
-            float upshiftRpm = Mathf.Lerp(activeShiftRpm - 1300f, activeShiftRpm, throttle);
+            float normalUpshiftRpm = Mathf.Lerp(activeShiftRpm - 1300f, activeShiftRpm, throttle);
+            float upshiftRpm = Mathf.Lerp(normalUpshiftRpm, DriftUpshiftRpm, driftAmount);
+            float downshiftRpm = Mathf.Lerp(3400f, DriftDownshiftRpm, driftAmount);
             float roadRpm = shaftRpm * Ratio(currentGear);
             if (currentGear < topGear && !handbrake && roadRpm >= upshiftRpm)
                 next++;
-            else if (currentGear > 0 && roadRpm < 3400f && shaftRpm * Ratio(currentGear - 1) < upshiftRpm - 850f)
+            else if (currentGear > 0 && roadRpm < downshiftRpm && shaftRpm * Ratio(currentGear - 1) < upshiftRpm - 850f)
                 next--;
         }
 
