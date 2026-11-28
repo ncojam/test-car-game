@@ -295,8 +295,6 @@ public class CarController : MonoBehaviour
         {
             next = Mathf.Clamp(currentGear + pendingShift, 0, topGear);
             pendingShift = 0;
-            if (next < currentGear && shaftRpm * Ratio(next) >= RedlineRpm - 200f)
-                return;
         }
         else
         {
